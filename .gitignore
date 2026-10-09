@@ -1,0 +1,31 @@
+# 默认忽略全部，仅放行下方明确列出的目录和文件。
+*
+
+# 显式允许 app 包纳入版本控制；下方仍排除敏感配置和 Python 缓存。
+!/app/
+!/app/**
+
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# data 仅保留直接子目录的占位文件，忽略业务文件和更深层目录。
+!/data/
+/data/*
+!/data/*/
+/data/*/*
+!/data/*/.gitkeep
+
+# description 目录及所有层级的内容均纳入版本控制。
+!/description/
+!/description/**
+
+# 项目根目录的构建、配置示例及开发规范文件。
+!/.dockerignore
+!/.env.example
+!/.gitignore
+!/AGENTS.md
+!/Dockerfile
+!/requirement.txt

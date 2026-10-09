@@ -1,0 +1,18 @@
+# 项目统一使用 Python 3.12（本地 Conda 与容器）。
+# 基于 asyncio 的 RabbitMQ Stream 专用协议客户端。
+rstream==1.1.0
+
+# HTTP API 框架。
+fastapi==0.142.4
+
+# ASGI 服务器。
+uvicorn==0.54.0
+
+# 平台 YAML 配置安全解析。
+PyYAML==6.0.3
+
+# 项目本地会话配置读取。
+python-dotenv==1.2.1
+
+# multipart 文件及表单上传解析。
+python-multipart==0.0.22

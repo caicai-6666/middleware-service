@@ -1,0 +1,15 @@
+.git
+.idea
+.env
+.env.*
+**/platform.yaml
+.venv
+**/__pycache__
+**/*.py[cod]
+.DS_Store
+description
+experiment
+tests
+AGENTS.md
+
+data/tmp-file/
