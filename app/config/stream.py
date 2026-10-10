@@ -16,8 +16,10 @@ class StreamSettings:
     port: int = 5552
     virtual_host: str = "/"
     request_stream: str = "ingestion-requests"
-    result_stream: str = "review-results"
+    result_stream: str = "ingestion-results"
     registry_platform_code: str = "registry"
+    deletion_request_stream: str = "deletion-requests"
+    deletion_result_stream: str = "deletion-results"
 
 
 def load_stream_settings() -> StreamSettings:
@@ -41,8 +43,12 @@ def load_stream_settings() -> StreamSettings:
         host=value("RABBITMQ_HOST", "localhost"), port=port,
         virtual_host=value("RABBITMQ_VHOST", "/"),
         request_stream=value("RABBITMQ_REQUEST_STREAM", "ingestion-requests"),
-        result_stream=value("RABBITMQ_RESULT_STREAM", "review-results"),
+        result_stream=value("RABBITMQ_RESULT_STREAM", "ingestion-results"),
+        deletion_request_stream=value("RABBITMQ_DELETION_REQUEST_STREAM", "deletion-requests"),
+        deletion_result_stream=value("RABBITMQ_DELETION_RESULT_STREAM", "deletion-results"),
     )
-    if settings.request_stream == settings.result_stream:
-        raise ValueError("入库请求流与审核结果流名称不能相同。")
+    names = (settings.request_stream, settings.result_stream,
+             settings.deletion_request_stream, settings.deletion_result_stream)
+    if len(set(names)) != len(names):
+        raise ValueError("四个业务流名称不能相同。")
     return settings

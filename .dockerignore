@@ -12,4 +12,6 @@ experiment
 tests
 AGENTS.md
 
-data/tmp-file/
+data/ingestion-request/file/
+data/deletion-request/file/
+data/rabbitmq-dev/

@@ -15,3 +15,5 @@ async def initialize_streams(settings: StreamSettings) -> None:
             # 不声明新的保留参数，避免暗中改变已有流的数据保留约定。
             await producer.create_stream(settings.request_stream, exists_ok=True)
             await producer.create_stream(settings.result_stream, exists_ok=True)
+            await producer.create_stream(settings.deletion_request_stream, exists_ok=True)
+            await producer.create_stream(settings.deletion_result_stream, exists_ok=True)

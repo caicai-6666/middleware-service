@@ -1,6 +1,6 @@
 # 审核反馈消息契约
 
-本文定义 `review-results` 流的消息结构。HTTP 调用方式见[审核反馈接口](../../api/review.md)。
+本文定义 `ingestion-results` 流的消息结构。HTTP 调用方式见[审核反馈接口](../../api/ingestion-review.md)。
 
 ## 消息结构
 
@@ -34,9 +34,11 @@
 
 `message_id` 与 `request_id` 各自标识反馈和原请求。当前没有持久化原请求索引，因此不验证请求存在性或目标归属；注册中心负责正确关联。
 
+发布去重使用 `(target_platform_code, request_id)`，仅比较接收子平台在本流的已确认 offset；其尚未确认旧反馈时拒绝重发，确认后允许生成新反馈。其他子平台和 registry 的进度不能解除限制。具体机制见[流发布去重服务](../../capability/application/stream-publish-deduplication.md)。消息结构保持不变，不新增去重字段。
+
 接收平台不要求在线。消费接口根据认证身份过滤 `target_platform_code`，并按平台独立维护消费进度；详见[审核反馈消费服务](../../capability/application/review-consumer.md)。
 
-消息发送不改变原入库请求的确认状态，不执行文件清理。发布失败、确认不确定及重复提交的处理边界见[提交审核反馈](../../api/review.md#提交审核反馈)。
+消息发送不改变原入库请求的确认状态，不执行文件清理。发布失败、确认不确定及重复提交的处理边界见[提交审核反馈](../../api/ingestion-review.md#提交审核反馈)。
 
 新增发布请求必须提供 `passport`，缺失或非字符串返回 422。历史流消息可能不含该字段，消费时保持原始消息结构，不补默认值。
 

@@ -46,8 +46,8 @@
 
 | 平台 | Producer 目标 | Consumer 目标 |
 | --- | --- | --- |
-| 注册中心（默认 `registry`） | `review-results` | `ingestion-requests` |
-| 其他白名单平台 | `ingestion-requests` | `review-results` |
+| 注册中心（默认 `registry`） | `ingestion-results`、`deletion-results` | `ingestion-requests`、`deletion-requests` |
+| 其他白名单平台 | `ingestion-requests`、`deletion-requests` | `ingestion-results`、`deletion-results` |
 
 注册中心代号通过 `RABBITMQ_REGISTRY_PLATFORM_CODE` 配置，默认与本地 YAML 的 `registry` 一致。流名沿用 Stream 配置。Consumer 的稳定名称为 `平台代号:流名`，不随令牌变化，供后续订阅和 offset 管理使用。
 
@@ -66,3 +66,5 @@
 ## 业务接口认证依赖
 
 `app/router/dependencies.py` 的 `require_platform` 通过 FastAPI `Depends` 解析 Bearer 令牌，从会话缓存获得平台代号，返回 `AuthenticatedPlatform`。缺少、无效或过期令牌返回 401。入库生产、心跳和平台列表接口已使用此依赖，不再接收调用方声明的 platform_code；服务层仍在落盘前和发布前复核身份与生产权限，避免长请求期间会话过期。登录仍通过 platform_code 与 secret 认证；健康检查用于容器探活，保持匿名。
+
+同一 Producer/Consumer 可访问多个授权流，资源对象中的 `publish_streams`/`consume_streams` 保存允许的流集合。消费时按目标流返回独立消费名称 `<code>:<stream>`，不同流的 offset 不混用。旧的单流字段保留入库方向，支持已有调用。删除消费 HTTP 能力仍待实现。

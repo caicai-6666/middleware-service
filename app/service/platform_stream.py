@@ -17,6 +17,8 @@ class PlatformStreamResources:
     publish_stream: str
     consume_stream: str
     consumer_name: str
+    publish_streams: frozenset[str] = field(default_factory=frozenset)
+    consume_streams: frozenset[str] = field(default_factory=frozenset)
 
 
 class PlatformStreamManager:
@@ -38,4 +40,9 @@ class PlatformStreamManager:
                 publish_stream=settings.result_stream if registry else settings.request_stream,
                 consume_stream=consume_stream,
                 consumer_name=f"{code}:{consume_stream}",
+                # 一个客户端支持多个流，业务流权限按平台角色明确列举。
+                publish_streams=frozenset((settings.result_stream, settings.deletion_result_stream)
+                                         if registry else (settings.request_stream, settings.deletion_request_stream)),
+                consume_streams=frozenset((settings.request_stream, settings.deletion_request_stream)
+                                         if registry else (settings.result_stream, settings.deletion_result_stream)),
             )

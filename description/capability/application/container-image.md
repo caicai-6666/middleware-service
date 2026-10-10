@@ -38,32 +38,32 @@ middleware-service-deploy/
     └── requirement.txt
 ```
 
-部署项目中的应用服务默认使用 `build.context: ./middleware-service` 和 `dockerfile: Dockerfile`，通过 `MIDDLEWARE_BUILD_CONTEXT` 覆盖构建路径。本地当前为两个同级项目，设为 `../middleware-service`。
+部署项目仅维护生产配置，应用服务使用 `build.context: ./middleware-service` 和 `dockerfile: Dockerfile`。生产部署前将应用仓库拉取到部署目录的 `middleware-service/` 子目录，不设置本机同级目录覆盖。
 
-Compose 使用 `--profile backend` 启用后端。平台配置只读挂载；deploy 的 `.env` 中的 `RABBITMQ_USER`、`RABBITMQ_PASSWORD` 同时注入 RabbitMQ 和后端容器。后端通过 `rabbitmq:5552` 访问服务，Stream advertised host 为 `rabbitmq`；后端等待 RabbitMQ 健康后启动。生产配置不发布 RabbitMQ 端口。
+Compose 默认启动后端和 RabbitMQ。平台配置只读挂载；deploy 的 `.env` 中的 `RABBITMQ_USER`、`RABBITMQ_PASSWORD` 同时注入 RabbitMQ 和后端容器。后端通过 `rabbitmq:5552` 访问服务，Stream advertised host 为 `rabbitmq`；后端等待 RabbitMQ 健康后启动。生产配置不发布 RabbitMQ 端口，项目名称为 `middleware-service`，与开发卷命名独立。
+
+部署 `.env.example` 与 Compose 已同步四个流名称、`RABBITMQ_REGISTRY_PLATFORM_CODE`、`RABBITMQ_VHOST`、会话有效期/心跳/清理周期，以及 `INGESTION_CACHE_*`、`REVIEW_CACHE_*`、`DELETION_CACHE_*`、`DELETION_REVIEW_CACHE_*` 四组缓存上限。Compose 的 `.env` 用于变量插值，只有在 backend.environment 中显式声明的参数才会进入后端；应用镜像不依赖本地开发 `.env`。具体约束见[会话配置](platform-session.md)、[流配置](../infrastructure/stream-initialization.md)和[结果消费缓存配置](review-consumer.md)。
 
 在 deploy 目录准备 `.env` 和 `platform.yaml` 后启动：
 
 ```bash
-docker compose --profile backend up -d --build --wait
+docker compose up -d --build --wait
 ```
 
 RabbitMQ 的 `RABBITMQ_DEFAULT_USER/PASS` 用于空数据目录的首次初始化；已有数据卷中的用户密码不会因修改 `.env` 自动更新，轮换密码需同步修改 RabbitMQ 已有账号。不要为更改密码删除数据卷。
 
-宿主机运行后端时，使用开发覆盖文件启用本机端口和 localhost 广播地址：
+`RABBITMQ_VHOST` 同时注入后端和 RabbitMQ 的 `RABBITMQ_DEFAULT_VHOST`，默认 `/`；后者仅在空数据目录首次初始化时创建默认 vhost。已有卷若更换 vhost，需先创建目标 vhost 并授予现有账号权限。去重、平台会话和待确认缓存目前只支持一个后端进程，保持镜像默认的单 worker 启动方式。
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait rabbitmq
-```
-
-开发覆盖文件面向宿主机后端，不与容器 backend 混用。
+本机开发配置在应用项目 `data/rabbitmq-dev/`，不放在 deploy，也不进入镜像；使用方式见[RabbitMQ 本地开发环境](../infrastructure/rabbitmq-stream.md)。
 
 
 ## RabbitMQ 启动依赖
 
-应用启动现需连接 RabbitMQ 并初始化两个业务流。容器必须注入连接配置，具体字段见[业务流启动初始化](../infrastructure/stream-initialization.md)。根目录 `.env` 不会打包进镜像；部署项目已完成统一凭据注入与容器内地址配置。
+应用启动现需连接 RabbitMQ 并初始化四个业务流。容器必须注入连接配置，具体字段见[业务流启动初始化](../infrastructure/stream-initialization.md)。根目录 `.env` 不会打包进镜像；部署项目已完成统一凭据注入与容器内地址配置。
 
 
 ## 上传文件持久化
 
-后端将入库请求附件保存至 `/workspace/data/tmp-file`。Dockerfile 准备可写目录，Compose 挂载 `backend-files` 命名卷；不要删除该卷，否则流中消息引用的文件将丢失。注册中心 ack 后删除对应文件，当前没有定时清理或异常遗留文件的后台补偿。
+后端将入库请求附件保存至 `/workspace/data/ingestion-request/file`。Dockerfile 准备可写目录，Compose 挂载 `backend-files` 命名卷；不要删除该卷，否则流中消息引用的文件将丢失。注册中心 ack 后删除对应文件，当前没有定时清理或异常遗留文件的后台补偿。
+
+删除申请附件保存在 `/workspace/data/deletion-request/file`，Dockerfile 准备独立可写目录，Compose 挂载 `deletion-files` 卷。删除附件内容不进入镜像；registry 确认删除申请后清理对应附件；当前没有定时清理或异常遗留文件补偿。

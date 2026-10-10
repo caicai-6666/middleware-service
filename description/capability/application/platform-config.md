@@ -58,10 +58,10 @@ PLATFORM_CONFIG_PATH=/data/platform-config/platform.yaml → 后端加载文件
 配置不写入镜像，不需要逐项注入密钥变量。缺少源文件时挂载配置不会自动创建同名目录。在部署项目目录执行：
 
 ```bash
-docker compose --profile backend up -d --build --wait
+docker compose up -d --build --wait
 ```
 
-Compose 的 `.env` 负责 RabbitMQ 凭据和构建路径等部署参数。本机同级仓库布局设置 `MIDDLEWARE_BUILD_CONTEXT=../middleware-service`；生产预期为 `./middleware-service`。`backend` profile 不影响开发 RabbitMQ 的独立启动。
+Compose 的 `.env` 负责 RabbitMQ 凭据、业务流和后端运行参数。deploy 仅保留生产布局，应用仓库位于 `./middleware-service`；本机开发由应用项目 `data/rabbitmq-dev/` 的独立配置管理。
 
 ---
 

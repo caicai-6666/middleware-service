@@ -1,6 +1,6 @@
 # 入库请求消费服务
 
-`app/service/ingestion_consumer.py` 实现注册中心批量预取、逐条交付与显式确认，由 `app/main.py` 装配为 `app.state.ingestion_consumer`。接口定义见[入库请求 API](../../api/ingestion.md)。
+`app/service/ingestion_consumer.py` 配置入库消费，复用 `app/service/file_request_consumer.py` 实现的批量预取、逐条交付、显式确认和附件清理，由 `app/main.py` 装配为 `app.state.ingestion_consumer`。接口定义见[入库请求 API](../../api/ingestion.md)。
 
 ## 生命周期和进度
 
@@ -36,7 +36,7 @@ Consumer 名称沿用平台资源中的 `平台代号:流名`，不会随 access
 - 平台失活或应用关闭时，会话服务在平台锁内调用 clear_platform，同步释放该平台的预取缓存、待确认记录和最近确认记录，再关闭客户端。重登后从 RabbitMQ 已确认 offset 的下一条重读。
 - 资源与状态仍按单进程、单副本设计；同名消费进度不要被其他服务实例写入。
 - Stream 保留策略可能清除尚未消费的数据，保存 offset 不会阻止过期清理。
-- 本服务在 ack 回查 offset 成功后删除对应文件；不下载文件、不发布审核结果。
+- 本服务在 ack 回查 offset 成功后删除对应文件；附件读取由[resource 路由](../../api/resource.md)提供，审核结果单独发布。
 
 ---
 
@@ -49,6 +49,6 @@ Consumer 名称沿用平台资源中的 `平台代号:流名`，不会随 access
 
 ## 确认后的文件清理
 
-文件路径由消息中的 file_id 和 file_extension 构建，限定在 data/tmp-file 目录。file_id 必须等于 message_id，且字段不得含路径分隔符；非法引用在提交 offset 前被拒绝。历史无后缀文件按 file_id 清理；没有文件引用的消息跳过此步骤。
+文件路径由消息中的 file_id 和 file_extension 构建，限定在 data/ingestion-request/file 目录。file_id 必须等于 message_id，且字段不得含路径分隔符；非法引用在提交 offset 前被拒绝。历史无后缀文件按 file_id 清理；没有文件引用的消息跳过此步骤。
 
 删除在线程池执行，文件不存在视为成功。删除失败返回明确的 503 并保留队首，重复 ack 会回查已提交进度后再次删除，不重复提交。最近成功确认的重试不会重复删除文件。进度保存与文件删除不是原子事务，崩溃或会话失活可能留下文件，当前不提供后台补偿任务。

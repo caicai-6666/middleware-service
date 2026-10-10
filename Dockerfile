@@ -11,7 +11,8 @@ RUN pip install --no-cache-dir -r requirement.txt
 
 RUN groupadd --system app && useradd --system --gid app --home-dir /workspace app
 COPY --chown=app:app . .
-RUN mkdir -p /workspace/data/tmp-file && chown app:app /workspace/data/tmp-file
+RUN mkdir -p /workspace/data/ingestion-request/file /workspace/data/deletion-request/file \
+    && chown app:app /workspace/data/ingestion-request/file /workspace/data/deletion-request/file
 USER app
 
 EXPOSE 8000

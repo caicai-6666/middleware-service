@@ -6,7 +6,7 @@ import time
 import logging
 from contextlib import AsyncExitStack, asynccontextmanager
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from app.config.platform import Platform
 from app.config.session import SessionSettings
@@ -165,9 +165,12 @@ class PlatformSessionService:
             resources = self._resources.get(code)
             if resources is None:
                 raise PlatformResourcesUnavailableError()
-            if resources.consume_stream != stream:
+            if resources.consume_stream != stream and stream not in resources.consume_streams:
                 raise PlatformConsumeForbiddenError()
-            yield resources
+            # 为本次操作选择独立消费名称，避免入库与删除共享 offset。
+            yield resources if resources.consume_stream == stream else replace(
+                resources, consume_stream=stream, consumer_name=f"{code}:{stream}",
+            )
 
     async def check_publish_access(self, code: str, token: str, stream: str) -> None:
         if code not in self._locks:
@@ -182,7 +185,7 @@ class PlatformSessionService:
         resources = self._resources.get(code)
         if resources is None:
             raise PlatformResourcesUnavailableError()
-        if resources.publish_stream != stream:
+        if resources.publish_stream != stream and stream not in resources.publish_streams:
             raise PlatformPublishForbiddenError()
         return resources.producer
 

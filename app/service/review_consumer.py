@@ -1,4 +1,4 @@
-"""按接收平台隔离反馈交付及消费进度。"""
+"""入库及删除结果共用的接收平台过滤、逐条交付及消费确认流程。"""
 
 import asyncio
 import json
@@ -115,7 +115,7 @@ class ReviewConsumerService:
                     self._last_ack[code] = (message_id, pending.offset)
                     self._buffers[code].popleft()
                     del self._pending[code]
-                    # 反馈 ack 只确认本平台进度，不删除流消息或入库附件。
+                    # 结果 ack 只确认本平台在当前流的进度，不删除流消息或审核附件。
                     return pending.offset
         except (InvalidAccessTokenError, PlatformConsumeForbiddenError,
                 PlatformResourcesUnavailableError, AcknowledgementConflictError):

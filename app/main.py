@@ -11,6 +11,12 @@ from app.config.platform import load_platforms_from_env
 from app.config.stream import load_stream_settings
 from app.service.ingestion_consumer import IngestionConsumerService
 from app.service.ingestion import IngestionService
+from app.service.ingestion_deduplication import IngestionDeduplicator
+from app.service.stream_deduplication import StreamPublishDeduplicator
+from app.service.deletion import DeletionService
+from app.service.deletion_review import DeletionReviewService
+from app.service.resource import ResourceService
+from app.service.deletion_consumer import DeletionConsumerService
 from app.service.review import ReviewService
 from app.service.review_consumer import ReviewConsumerService
 from app.service.platform_stream import PlatformStreamManager
@@ -34,21 +40,55 @@ async def lifespan(application: FastAPI):
         stream_manager=PlatformStreamManager(stream_settings)
     )
     application.state.ingestion = IngestionService(
-        application.state.platform_sessions, stream_settings.request_stream
+        application.state.platform_sessions, stream_settings.request_stream,
+        deduplicator=IngestionDeduplicator(stream_settings),
+    )
+    application.state.deletion = DeletionService(
+        application.state.platform_sessions, stream_settings.deletion_request_stream,
+        stream_settings.registry_platform_code,
+        deduplicator=StreamPublishDeduplicator(
+            stream_settings, stream_settings.deletion_request_stream,
+            key_fields=("platform_code", "source_id"),
+            consumer_code=stream_settings.registry_platform_code,
+        ),
     )
     application.state.review = ReviewService(
         application.state.platform_sessions, stream_settings.result_stream,
         application.state.platforms, stream_settings.registry_platform_code,
+        deduplicator=StreamPublishDeduplicator(
+            stream_settings, stream_settings.result_stream,
+            key_fields=("target_platform_code", "request_id"),
+        ),
+    )
+    application.state.deletion_review = DeletionReviewService(
+        application.state.platform_sessions, stream_settings.deletion_result_stream,
+        application.state.platforms, stream_settings.registry_platform_code,
+        deduplicator=StreamPublishDeduplicator(
+            stream_settings, stream_settings.deletion_result_stream,
+            key_fields=("target_platform_code", "request_id"),
+        ),
     )
     application.state.ingestion_consumer = IngestionConsumerService(
         application.state.platform_sessions, stream_settings.request_stream,
         cache_settings=load_consumer_cache_settings(),
+    )
+    application.state.deletion_consumer = DeletionConsumerService(
+        application.state.platform_sessions, stream_settings.deletion_request_stream,
+        stream_settings.registry_platform_code,
+        cache_settings=load_consumer_cache_settings("DELETION"),
     )
     application.state.review_consumer = ReviewConsumerService(
         application.state.platform_sessions, stream_settings.result_stream,
         stream_settings.registry_platform_code,
         cache_settings=load_consumer_cache_settings("REVIEW"),
     )
+    # 两个结果流共用过滤/确认算法，但使用独立缓存与各自的 broker 消费进度。
+    application.state.deletion_review_consumer = ReviewConsumerService(
+        application.state.platform_sessions, stream_settings.deletion_result_stream,
+        stream_settings.registry_platform_code,
+        cache_settings=load_consumer_cache_settings("DELETION_REVIEW"),
+    )
+    application.state.resources = ResourceService(stream_settings.registry_platform_code)
     cleanup_task = asyncio.create_task(application.state.platform_sessions.run_cleanup())
     try:
         yield

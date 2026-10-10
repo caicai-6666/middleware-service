@@ -15,10 +15,11 @@ from app.service.stream_consumer import (
     AcknowledgementConflictError, ConsumptionUnavailableError, InvalidStreamMessageError,
 )
 from app.service.review import InvalidReviewTargetError, ReviewPublishError
+from app.service.stream_deduplication import DuplicateStreamMessageError, StreamDeduplicationUnavailableError
 
 
 router = APIRouter(
-    prefix="/review-results",
+    prefix="/ingestion-results",
     tags=["审核反馈"],
     responses={
         401: {"description": "令牌缺失、无效或已过期"},
@@ -31,7 +32,7 @@ PlatformIdentity = Annotated[AuthenticatedPlatform, Depends(require_platform)]
 class PublishReviewRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
-    request_id: str = Field(min_length=1, max_length=128, description="原入库请求的 message_id。")
+    request_id: str = Field(min_length=1, max_length=128, description="原入库请求的 message_id，与目标子平台代码组成去重键；该平台尚未确认同一请求的反馈时拒绝再次发布。")
     target_platform_code: str = Field(min_length=1, description="接收审核反馈的子平台代号，不表示调用方身份。")
     note: str = Field(max_length=10000, description="注册中心审核意见，允许为空字符串。")
     reviewer: str = Field(min_length=1, max_length=200, description="注册中心审核员姓名或代号。")
@@ -60,8 +61,9 @@ class AcknowledgeReviewRequest(BaseModel):
 
 @router.post("/publish", status_code=201, response_model=PublishReviewResponse, summary="提交审核反馈",
              responses={403: {"description": "非注册中心或无发布权限"},
+                        409: {"description": "同目标子平台、同 request_id 的反馈尚未确认"},
                         422: {"description": "请求参数或目标平台无效"},
-                        503: {"description": "发布未获确认或资源不可用"}})
+                        503: {"description": "去重不可用、发布未获确认或资源不可用"}})
 async def publish_review(body: PublishReviewRequest, request: Request,
                          platform: PlatformIdentity) -> PublishReviewResponse:
     try:
@@ -75,6 +77,11 @@ async def publish_review(body: PublishReviewRequest, request: Request,
         raise HTTPException(403, "仅注册中心可以提交审核反馈") from None
     except InvalidReviewTargetError:
         raise HTTPException(422, "target_platform_code 必须为配置中的子平台代号") from None
+    except DuplicateStreamMessageError as error:
+        raise HTTPException(409, {"message": "该子平台的 request_id 已有尚未确认的入库审核反馈",
+                                  "message_id": error.message_id, "offset": error.offset}) from None
+    except StreamDeduplicationUnavailableError:
+        raise HTTPException(503, "无法确认入库审核反馈是否重复，请稍后重试或核对此前投递结果") from None
     except PlatformResourcesUnavailableError:
         raise HTTPException(503, "消息服务暂不可用，请稍后重试") from None
     except ReviewPublishError as error:

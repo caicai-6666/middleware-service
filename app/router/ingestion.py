@@ -9,11 +9,12 @@ from pydantic import BaseModel, Field
 
 from app.router.dependencies import AuthenticatedPlatform, require_platform
 from app.service.ingestion import (
-    FILE_EXTENSION_PATTERN, FileStorageError, MessagePublishError, InvalidFileExtensionError,
+    FILE_EXTENSION_PATTERN, FileStorageError, MessagePublishError, InvalidFileExtensionError, InvalidSourceIdError,
 )
 from app.service.platform_session import (
     PlatformConsumeForbiddenError, InvalidAccessTokenError, PlatformPublishForbiddenError, PlatformResourcesUnavailableError,
 )
+from app.service.ingestion_deduplication import DuplicateIngestionError, IngestionDeduplicationUnavailableError
 
 from app.service.ingestion_consumer import (
     AcknowledgedFileCleanupError, AcknowledgementConflictError, ConsumptionUnavailableError, InvalidStreamMessageError,
@@ -49,26 +50,31 @@ class IngestionResponse(BaseModel):
 
 @router.post("/publish", response_model=IngestionResponse, status_code=201, summary="提交入库请求",
              responses={401: {"description": "身份无效"}, 403: {"description": "无生产权限"},
-                        500: {"description": "文件保存失败"}, 503: {"description": "发布未确认或资源不可用"}})
+                        409: {"description": "同平台、同 source_id 的申请尚未确认"},
+                        500: {"description": "文件保存失败"}, 503: {"description": "去重不可用、发布未确认或资源不可用"}})
 async def submit_ingestion(
     request: Request,
+    source_id: Annotated[str, Form(min_length=1, max_length=128, description="数据在子平台内的唯一 ID；与令牌识别的平台代码组成去重键，已有未确认申请时拒绝再次提交。")],
     name: Annotated[str, Form(min_length=1, max_length=200, description="入库资料名称。")],
     abstract: Annotated[str, Form(min_length=1, max_length=10000, description="入库资料摘要。")],
-    note: Annotated[str, Form(max_length=10000, description="平台与注册中心审核员的沟通说明。")],
     reviewer: Annotated[str, Form(min_length=1, max_length=200, description="发起请求的平台审核员姓名或代号。")],
     file_extension: Annotated[str, Form(pattern=FILE_EXTENSION_PATTERN, description="文件后缀，不带点，1–16 位英文字母或数字；保存为小写，例如 pdf。")],
     file: Annotated[UploadFile, File(description="需要转存的单个文件。")],
     platform: Annotated[AuthenticatedPlatform, Depends(require_platform)],
+    # 空表单字符串会被 FastAPI 按缺省值处理；默认空字符串表示没有沟通备注。
+    note: Annotated[str, Form(max_length=10000, description="平台与注册中心审核员的沟通说明，允许为空字符串；省略时默认为空字符串。")] = "",
 ) -> IngestionResponse:
-    for field, value in (("name", name), ("abstract", abstract)):
+    for field, value in (("name", name), ("abstract", abstract), ("source_id", source_id)):
         if not value.strip():
             raise HTTPException(422, f"{field} 不能仅包含空白字符")
     if not reviewer.strip():
         raise HTTPException(422, "reviewer 不能仅包含空白字符")
     try:
         message_id = await request.app.state.ingestion.submit(
-            platform.code, platform.access_token, note, reviewer, file, file_extension, name=name, abstract=abstract,
+            platform.code, platform.access_token, note, reviewer, file, file_extension, name=name, abstract=abstract, source_id=source_id,
         )
+    except InvalidSourceIdError:
+        raise HTTPException(422, "source_id 必须为非空白的 1–128 字符字符串") from None
     except InvalidFileExtensionError:
         raise HTTPException(422, "file_extension 必须为不带点的 1–16 位英文字母或数字") from None
     except InvalidAccessTokenError:
@@ -76,6 +82,11 @@ async def submit_ingestion(
                             headers={"WWW-Authenticate": "Bearer"}) from None
     except PlatformPublishForbiddenError:
         raise HTTPException(403, "该平台无权提交入库请求") from None
+    except DuplicateIngestionError as error:
+        raise HTTPException(409, {"message": "该平台的 source_id 已有尚未确认的入库请求",
+                                  "message_id": error.message_id, "offset": error.offset}) from None
+    except IngestionDeduplicationUnavailableError:
+        raise HTTPException(503, "无法确认入库请求是否重复，请稍后重试或核对此前投递结果") from None
     except PlatformResourcesUnavailableError:
         raise HTTPException(503, "消息服务暂不可用，请稍后重试") from None
     except FileStorageError:
