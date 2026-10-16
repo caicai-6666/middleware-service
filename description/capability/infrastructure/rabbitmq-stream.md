@@ -19,12 +19,12 @@
 
 ## 启动与连接
 
-deploy 仅维护生产配置；本机开发配置位于应用项目 `data/rabbitmq-dev/`，目录内文件按现有 data 规则忽略，只有 `.gitkeep` 进入 Git，Docker 构建也排除此目录。因此拉取应用仓库后，本机开发人员需要自行准备该目录内的 Compose、RabbitMQ 配置和插件列表；生产部署不依赖这些开发文件。
+deploy 仅维护生产配置；本机开发配置位于应用项目 `data/rabbitmq-dev/`，目录内文件按现有 data 规则忽略，只有 `.gitkeep` 进入 Git，Docker 构建也排除此目录。因此拉取应用仓库后，本机开发人员需要自行准备该目录内的 Compose、Dockerfile、bootstrap.py、RabbitMQ 配置和插件列表；生产部署不依赖这些开发文件。
 
 以下命令从应用项目根目录执行。首次配置时复制本项目 `.env.example` 为 `.env` 并设置账号密码；Compose 通过 `--env-file .env` 读取凭据，不依赖 deploy 的环境文件。
 
 ```bash
-docker compose --env-file .env -f data/rabbitmq-dev/docker-compose.yml up -d --wait rabbitmq
+docker compose --env-file .env -f data/rabbitmq-dev/docker-compose.yml up -d --build --wait rabbitmq
 conda activate middleware-service
 python -m pip install -r requirement.txt
 ```
@@ -40,7 +40,7 @@ python -m pip install -r requirement.txt
 
 端口仅绑定 `127.0.0.1`，适用于宿主机上的开发程序；未发布 AMQP 5672 端口。开发账号同时用于管理与客户端验证，正式部署应另行设计最小权限账号与 TLS。
 
-Stream 客户端会使用服务端返回的地址建立后续连接。本机 Compose 挂载 `data/rabbitmq-dev/rabbitmq.conf`，广播地址为 `localhost`。生产 deploy 使用独立 `rabbitmq/rabbitmq.conf`，广播地址为 `rabbitmq`，不发布 RabbitMQ 端口；生产项目名为 `middleware-service`，与开发命名卷独立。统一账号密码注入及生产启动方式见[应用容器镜像](../application/container-image.md)。
+Stream 客户端会使用服务端返回的地址建立后续连接。本机镜像构建时复制 `data/rabbitmq-dev/rabbitmq.conf`，广播地址为 `localhost`。生产 deploy 在 `rabbitmq/Dockerfile` 中复制独立 `rabbitmq/rabbitmq.conf`，广播地址为 `rabbitmq`，不发布 RabbitMQ 端口；生产项目名为 `middleware-service`，与开发命名卷独立。统一账号密码注入及生产启动方式见[应用容器镜像](../application/container-image.md)。
 
 默认账号环境变量只在空数据目录初始化时生效。已有持久卷时修改 `.env` 不会自动修改服务端密码，应通过管理界面或 RabbitMQ 用户管理命令同步变更。
 

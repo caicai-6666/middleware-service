@@ -8,7 +8,7 @@
 
 ## 过滤与进度
 
-每个平台通过会话资源获取独立 Consumer，稳定消费名称为 `<platform_code>:<result_stream>`，由 RabbitMQ 保存对应 offset。中间件依据已认证平台身份匹配消息的 `target_platform_code`，不将其他平台反馈交给调用方。
+每个平台通过会话资源获取独立 Consumer，稳定消费名称为 `<platform_code>:<result_stream>`，由 RabbitMQ 保存对应 offset。中间件依据已认证平台身份匹配消息的 `target_platform_code`，不将其他平台反馈交给调用方。消息含 passport 时共用 app/service/passport.py 规范为字符串数组，历史单字符串及空字符串兼容，缺失字段不补值；不改写 broker 原消息。
 
 例如依次为 `B@10、A@12、B@14、A@16`：A 第一次 pull 自动提交无关前缀到 10，返回 12；未 ack 12 前重复 pull 仍返回 12。ack 12 后下一次 pull 才能跳过 14 并返回 16。B 的进度独立，不受 A 的操作影响。
 

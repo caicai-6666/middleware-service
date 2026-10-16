@@ -1,6 +1,6 @@
 # FastAPI 应用基础结构
 
-本模块提供 HTTP 应用入口、路由装配与开发启动方式。当前实现平台配置启动加载、平台登录、心跳续期与存活检查；已接入[业务流启动初始化](../infrastructure/stream-initialization.md)，已实现[入库请求提交](../../api/ingestion.md)，注册中心拉取和确认接口也已实现，见[入库请求消费服务](ingestion-consumer.md)。会话缓存及后台清理见[平台会话服务](platform-session.md)。
+本模块提供 HTTP 应用入口、路由装配与开发启动方式。当前实现平台配置启动加载、平台登录、心跳续期与存活检查；已接入[业务流启动校验](../infrastructure/stream-initialization.md)，已实现[入库请求提交](../../api/ingestion.md)，注册中心拉取和确认接口也已实现，见[入库请求消费服务](ingestion-consumer.md)。会话缓存及后台清理见[平台会话服务](platform-session.md)。
 
 ## 代码职责
 
@@ -26,13 +26,17 @@ python -m pip install -r requirement.txt
 python -m app.main
 ```
 
-模块启动默认监听 `127.0.0.1:22000`。需要开发热重载时使用：
+模块启动默认监听 `127.0.0.1:22000`，自动启用开发热重载。`app/main.py` 向 Uvicorn 传入应用导入字符串 `app.main:app`，以单 worker 运行，并仅监听 `app/` 下的 Python 代码变化。临时业务文件不参与代码重载。
+
+也可显式通过 Uvicorn 启动：
 
 ```bash
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn app.main:app --host 127.0.0.1 --port 22000 --reload --reload-dir app
 ```
 
-使用模块方式启动，不使用 `python app/main.py`。服务启动需要有效的平台配置与 RabbitMQ 连接配置，RabbitMQ 必须在线且账号有权声明流。默认读取项目根目录的 `data/platform-config/platform.yaml`，密钥直接填写在 YAML 中；可通过 `PLATFORM_CONFIG_PATH` 覆盖路径。
+使用模块方式启动，不使用 `python app/main.py`。服务启动需要有效的平台配置与 RabbitMQ 连接配置，RabbitMQ 容器须已准备四个业务流，后端仅检查存在性。默认读取项目根目录的 `data/platform-config/platform.yaml`，密钥直接填写在 YAML 中；可通过 `PLATFORM_CONFIG_PATH` 覆盖路径。
+
+热重载会重启服务进程，重新执行 lifespan，内存登录会话和待确认缓存会重建；子平台需要重新登录，未确认消息从 RabbitMQ 已保存进度恢复。平台 YAML 与 `.env` 不在 Python 代码监听范围内，修改后需要手动重启。容器仍使用 Dockerfile 的生产启动命令，不启用热重载。
 
 启动后访问 `/docs` 查看 Swagger UI，`/redoc` 查看 ReDoc，`/openapi.json` 获取 OpenAPI 定义。存活检查契约见 [健康检查 API](../../api/health.md)。容器启动见[应用容器镜像](container-image.md)。
 

@@ -7,6 +7,7 @@ from collections import deque
 from rstream import exceptions
 
 from app.config.consumer import ConsumerCacheSettings
+from app.service.passport import normalize_message_passports
 from app.service.platform_session import (
     InvalidAccessTokenError, PlatformConsumeForbiddenError, PlatformResourcesUnavailableError,
 )
@@ -57,7 +58,7 @@ class ReviewConsumerService:
                     raise ValueError()
             if len(message["message_id"]) > 128:
                 raise ValueError()
-            return message
+            return normalize_message_passports(message)
         except (ValueError, TypeError, UnicodeError):
             # 无法确定接收方的坏消息不能猜测归属后跳过。
             raise InvalidStreamMessageError() from None

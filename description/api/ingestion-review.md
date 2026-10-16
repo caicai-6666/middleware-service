@@ -42,9 +42,11 @@ Body 为 JSON，无 path 或 query 参数。
 | `target_platform_code` | string | 是 | 配置中存在的子平台代号，不能为注册中心；不要求在线。 |
 | `note` | string | 是 | 审核意见，最多 10000 字符，允许空字符串。 |
 | `reviewer` | string | 是 | 注册中心审核员姓名或代号，1–200 字符，不能仅包含空白。 |
-| `passport` | string | 是 | 最终审核结果字符串，允许为空；中间件原样写入流，不解析、不去除空白。 |
+| `passport` | string[]（兼容 string） | 是 | 通行证集合，每项非空白；允许 `[]` 表示未签发。旧单字符串自动转为单元素数组，旧空字符串转为 `[]`。 |
 
 JSON 中的 `"note": ""` 合法，写入消息时原样保留。该字段仍必填，省略、传入 `null` 或超过长度限制时返回 `422`。
+
+通行证数量不影响消息粒度，一条审核结果携带多个通行证，仍按同一 message_id 确认。值不裁剪、不去重，具体校验及历史兼容见[通行证集合契约](../architecture/data/passport.md)。
 
 ### 成功响应
 
@@ -84,7 +86,7 @@ JSON 中的 `"note": ""` 合法，写入消息时原样保留。该字段仍必�
 curl -X POST "http://127.0.0.1:22000/middleware-service/api/ingestion-results/publish" \
   -H "Authorization: Bearer <注册中心 access_token>" \
   -H 'Content-Type: application/json' \
-  -d '{"request_id":"原入库消息标识","target_platform_code":"contract-pheno","note":"审核通过","reviewer":"张三","passport":"最终审核结果"}'
+  -d '{"request_id":"原入库消息标识","target_platform_code":"contract-pheno","note":"审核通过","reviewer":"张三","passport":["通行证-001","通行证-002"]}'
 ```
 
 ### 行为与边界
@@ -126,7 +128,7 @@ Header：`Authorization: Bearer <access_token>`，必须为有效子平台会话
     "target_platform_code": "contract-pheno",
     "note": "审核通过",
     "reviewer": "张三",
-    "passport": "最终审核结果",
+    "passport": ["通行证-001", "通行证-002"],
     "created_at": "2026-10-09T08:00:00+00:00"
   }
 }
@@ -151,7 +153,7 @@ curl -X POST "http://127.0.0.1:22000/middleware-service/api/ingestion-results/pu
 
 中间件内部扫描共享流，只向调用方返回 `target_platform_code` 与认证平台代号完全一致的消息。第一条本平台消息之前的连续无关消息可以自动提交到本平台的消费进度，不影响其他平台。
 
-pull 原样返回消息字段，包括新消息中的 `passport`；历史消息若没有该字段，不自动补充。
+pull 返回完整消息，passport 统一规范为字符串数组；历史单字符串转为单元素数组，历史空字符串转为 `[]`，历史消息缺失该字段时不补值。不改写原 MQ 消息或消费位置。
 
 存在待确认反馈时，重复或并发 pull 返回同一条，不继续扫描、不越过它推进 offset。缓存耗尽后才读取下一批；本批全为其他平台消息时，保存跳过进度后返回 204。消费并非恰好一次，调用方应按反馈 `message_id` 幂等处理。
 
@@ -203,4 +205,4 @@ curl -X POST "http://127.0.0.1:22000/middleware-service/api/ingestion-results/ac
 
 同一活跃会话内，最近一次成功 ack 可以重复，即使下一条已经 pull 也不会确认下一条。失活或服务重启后重复确认记录不保留，旧 ack 可能返回 409；持久化 offset 仍用于后续恢复。
 
-发布契约已由 `passport` 替代 `result`，新请求不再接受 `result`（传入返回 422），新消息也不再写入该字段。已存入流的历史消息保持原样，不自动迁移。
+发布契约已由 `passport` 替代 `result`，新请求不再接受 `result`（传入返回 422），新消息也不再写入该字段。已存入流的历史消息不重写，拉取时仅规范化 passport 类型。

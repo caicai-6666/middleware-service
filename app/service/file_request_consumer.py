@@ -7,6 +7,7 @@ from pathlib import Path
 from starlette.concurrency import run_in_threadpool
 from collections import deque
 from app.config.consumer import ConsumerCacheSettings
+from app.service.passport import normalize_message_passports
 
 from rstream import exceptions
 from app.service.stream_consumer import (
@@ -73,6 +74,7 @@ class FileRequestConsumerService:
                     message = json.loads(raw)
                     if not isinstance(message, dict) or not isinstance(message.get("message_id"), str) or not message["message_id"]:
                         raise ValueError()
+                    message = normalize_message_passports(message)
                 except (ValueError, TypeError, UnicodeError):
                     raise InvalidStreamMessageError() from None
                 delivery = Delivery(offset, message)

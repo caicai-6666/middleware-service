@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r requirement.txt
 
 RUN groupadd --system app && useradd --system --gid app --home-dir /workspace app
 COPY --chown=app:app . .
+# 删除目录仅用于升级前带附件消息的读取与确认清理，新删除申请不落盘。
 RUN mkdir -p /workspace/data/ingestion-request/file /workspace/data/deletion-request/file \
     && chown app:app /workspace/data/ingestion-request/file /workspace/data/deletion-request/file
 USER app

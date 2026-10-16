@@ -1,6 +1,6 @@
 # 审核附件读取接口
 
-registry 根据申请消息中的文件引用读取入库或删除审核附件，返回原始二进制。路由位于 `app/router/resource.py`，文件访问由 `app/service/resource.py` 提供，在 `app/main.py` 装配为 `app.state.resources`。
+registry 根据申请消息中的文件引用读取入库附件或历史删除审核附件，返回原始二进制。路由位于 `app/router/resource.py`，文件访问由 `app/service/resource.py` 提供，在 `app/main.py` 装配为 `app.state.resources`。
 
 ## 接口目录
 
@@ -84,7 +84,7 @@ curl --fail "http://127.0.0.1:22000/middleware-service/api/resource/ingestion-re
 
 ## 读取删除审核附件
 
-`GET /middleware-service/api/resource/deletion-requests/{file_id}`，读取 `data/deletion-request/file` 中的临时审核文件。
+`GET /middleware-service/api/resource/deletion-requests/{file_id}`，仅用于读取 `data/deletion-request/file` 中的历史临时审核文件。新删除申请不上传文件，也不生成 file 引用；本接口保留用于处理升级前的带附件消息。
 
 ### 认证方式
 

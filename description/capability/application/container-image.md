@@ -32,6 +32,8 @@ middleware-service-deploy/
 ├── platform.yaml.example
 ├── platform.yaml
 ├── rabbitmq/
+│   ├── Dockerfile
+│   └── bootstrap.py
 └── middleware-service/
     ├── Dockerfile
     ├── .dockerignore
@@ -40,7 +42,7 @@ middleware-service-deploy/
 
 部署项目仅维护生产配置，应用服务使用 `build.context: ./middleware-service` 和 `dockerfile: Dockerfile`。生产部署前将应用仓库拉取到部署目录的 `middleware-service/` 子目录，不设置本机同级目录覆盖。
 
-Compose 默认启动后端和 RabbitMQ。平台配置只读挂载；deploy 的 `.env` 中的 `RABBITMQ_USER`、`RABBITMQ_PASSWORD` 同时注入 RabbitMQ 和后端容器。后端通过 `rabbitmq:5552` 访问服务，Stream advertised host 为 `rabbitmq`；后端等待 RabbitMQ 健康后启动。生产配置不发布 RabbitMQ 端口，项目名称为 `middleware-service`，与开发卷命名独立。
+Compose 默认启动后端和 RabbitMQ。平台配置只读挂载；deploy 的 `.env` 中的 `RABBITMQ_USER`、`RABBITMQ_PASSWORD` 同时注入 RabbitMQ 和后端容器。后端通过 `rabbitmq:5552` 访问服务，Stream advertised host 为 `rabbitmq`；RabbitMQ 镜像由 deploy/rabbitmq/Dockerfile 构建，容器声明四个流后才通过健康检查，后端随后启动。生产配置不发布 RabbitMQ 端口，项目名称为 `middleware-service`，与开发卷命名独立。
 
 部署 `.env.example` 与 Compose 已同步四个流名称、`RABBITMQ_REGISTRY_PLATFORM_CODE`、`RABBITMQ_VHOST`、会话有效期/心跳/清理周期，以及 `INGESTION_CACHE_*`、`REVIEW_CACHE_*`、`DELETION_CACHE_*`、`DELETION_REVIEW_CACHE_*` 四组缓存上限。Compose 的 `.env` 用于变量插值，只有在 backend.environment 中显式声明的参数才会进入后端；应用镜像不依赖本地开发 `.env`。具体约束见[会话配置](platform-session.md)、[流配置](../infrastructure/stream-initialization.md)和[结果消费缓存配置](review-consumer.md)。
 
@@ -59,11 +61,11 @@ RabbitMQ 的 `RABBITMQ_DEFAULT_USER/PASS` 用于空数据目录的首次初始�
 
 ## RabbitMQ 启动依赖
 
-应用启动现需连接 RabbitMQ 并初始化四个业务流。容器必须注入连接配置，具体字段见[业务流启动初始化](../infrastructure/stream-initialization.md)。根目录 `.env` 不会打包进镜像；部署项目已完成统一凭据注入与容器内地址配置。
+四个业务流由 RabbitMQ 容器初始化；应用启动连接 RabbitMQ，只校验流是否存在。容器必须注入连接配置，具体字段见[业务流启动初始化](../infrastructure/stream-initialization.md)。根目录 `.env` 不会打包进镜像；部署项目已完成统一凭据注入与容器内地址配置。
 
 
 ## 上传文件持久化
 
 后端将入库请求附件保存至 `/workspace/data/ingestion-request/file`。Dockerfile 准备可写目录，Compose 挂载 `backend-files` 命名卷；不要删除该卷，否则流中消息引用的文件将丢失。注册中心 ack 后删除对应文件，当前没有定时清理或异常遗留文件的后台补偿。
 
-删除申请附件保存在 `/workspace/data/deletion-request/file`，Dockerfile 准备独立可写目录，Compose 挂载 `deletion-files` 卷。删除附件内容不进入镜像；registry 确认删除申请后清理对应附件；当前没有定时清理或异常遗留文件补偿。
+历史删除申请附件保存在 `/workspace/data/deletion-request/file`，Dockerfile 准备独立可写目录，Compose 挂载 `deletion-files` 卷。删除附件内容不进入镜像；新删除申请不再保存附件；registry 确认历史带附件申请后清理对应旧附件；当前没有定时清理或异常遗留文件补偿。

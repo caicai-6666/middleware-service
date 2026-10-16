@@ -28,4 +28,5 @@ __pycache__/
 !/.gitignore
 !/AGENTS.md
 !/Dockerfile
+!/README.md
 !/requirement.txt

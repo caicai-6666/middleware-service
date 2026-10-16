@@ -14,7 +14,7 @@
 
 路由模块为 `app/router/deletion_review.py`，由 `app/router/__init__.py` 注册。所有接口通过 `Depends(require_platform)` 验证当前会话，从 token 获取调用平台身份。请求体为 JSON，禁止未知字段。
 
-publish 由 `app/service/deletion_review.py` 组装业务字段，共用 `app/service/result_message.py` 的权限、目标校验、去重及发布确认流程；启动时装配到 `app.state.deletion_review`。pull/ack 共用 `app/service/review_consumer.py` 的 `ReviewConsumerService`，独立装配到 `app.state.deletion_review_consumer`。`RABBITMQ_DELETION_RESULT_STREAM` 默认 `deletion-results`，由现有初始化幂等创建，复用活跃平台会话持有的 Producer/Consumer。
+publish 由 `app/service/deletion_review.py` 组装业务字段，共用 `app/service/result_message.py` 的权限、目标校验、去重及发布确认流程；启动时装配到 `app.state.deletion_review`。pull/ack 共用 `app/service/review_consumer.py` 的 `ReviewConsumerService`，独立装配到 `app.state.deletion_review_consumer`。`RABBITMQ_DELETION_RESULT_STREAM` 默认 `deletion-results`，由 RabbitMQ 容器初始化流程幂等创建，复用活跃平台会话持有的 Producer/Consumer。
 
 流程为子平台申请、注册中心审批、子平台正式删除。批准后子平台应在实际删除成功后确认结果，拒绝则记录拒绝后确认。中间件不负责删除子平台的文件，也不验证子平台是否已执行删除；ack 表示子平台声明本次结果已处理。
 
@@ -86,7 +86,7 @@ curl -X POST "http://127.0.0.1:22000/middleware-service/api/deletion-results/pub
 
 ### 行为与边界
 
-消息仅包含审批业务字段、中间件生成的 message_id 和 UTC created_at，不含附件或凭证。发布不修改删除申请的确认进度、不清理审核附件、不执行子平台删除；申请附件仍由 registry 对删除申请 ack 后清理。
+消息仅包含审批业务字段、中间件生成的 message_id 和 UTC created_at，不含附件或凭证。发布不修改删除申请的确认进度、不清理审核附件、不执行子平台删除；新删除申请不包含附件；历史申请附件仍由 registry 对删除申请 ack 后清理。
 
 按 `(target_platform_code, request_id)` 去重，依据该目标在删除结果流的 `<target_platform_code>:<stream>` 已持久化确认 offset，registry、其他子平台或入库结果流的进度均不能解除限制。旧结果尚未确认时返回 409，改变 approved、note 或 reviewer 不能绕过限制；目标通过 ack 确认后允许生成新结果，不同目标使用相同 request_id 不冲突。pull 不解除限制。
 

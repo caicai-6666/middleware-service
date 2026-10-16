@@ -11,6 +11,7 @@ description
 experiment
 tests
 AGENTS.md
+README.md
 
 data/ingestion-request/file/
 data/deletion-request/file/

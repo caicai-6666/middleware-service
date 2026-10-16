@@ -65,7 +65,7 @@ async def read_ingestion_file(request: Request, file_id: FileId, file_extension:
     return await read_resource(request, platform, "ingestion", file_id, file_extension)
 
 
-@router.get("/deletion-requests/{file_id}", response_class=ResourceResponse, status_code=200, summary="读取删除审核附件",
+@router.get("/deletion-requests/{file_id}", response_class=ResourceResponse, status_code=200, summary="读取历史删除审核附件",
             responses={200: {"description": "原始文件二进制", "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}})
 async def read_deletion_file(request: Request, file_id: FileId, file_extension: FileExtension,
                              platform: PlatformIdentity):

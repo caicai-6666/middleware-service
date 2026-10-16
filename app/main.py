@@ -20,7 +20,7 @@ from app.service.deletion_consumer import DeletionConsumerService
 from app.service.review import ReviewService
 from app.service.review_consumer import ReviewConsumerService
 from app.service.platform_stream import PlatformStreamManager
-from app.service.stream import initialize_streams
+from app.service.stream import verify_streams
 from app.config.session import load_session_settings
 from app.service.platform_session import PlatformSessionService
 from app.router import router
@@ -34,7 +34,7 @@ async def lifespan(application: FastAPI):
     # 在开始接受请求前完成全部校验，避免以不完整身份配置运行。
     application.state.platforms = MappingProxyType(load_platforms_from_env())
     stream_settings = load_stream_settings()
-    await initialize_streams(stream_settings)
+    await verify_streams(stream_settings)
     application.state.platform_sessions = PlatformSessionService(
         application.state.platforms, load_session_settings(),
         stream_manager=PlatformStreamManager(stream_settings)
@@ -114,7 +114,12 @@ app = create_app()
 
 
 if __name__ == "__main__":
+    from pathlib import Path
+
     import uvicorn
 
-    # 本地模块启动仅监听回环地址；容器监听地址由 Dockerfile 指定。
-    uvicorn.run(app, host="127.0.0.1", port=22000)
+    # 热重载需要应用导入字符串；仅监听 app 代码，避免临时业务文件触发重启。
+    uvicorn.run(
+        "app.main:app", host="127.0.0.1", port=22000,
+        reload=True, reload_dirs=[str(Path(__file__).resolve().parent)], workers=1,
+    )

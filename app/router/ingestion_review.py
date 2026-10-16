@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictStr, field_validator
 
 from app.router.dependencies import AuthenticatedPlatform, require_platform
 from app.service.platform_session import (
@@ -15,6 +15,7 @@ from app.service.stream_consumer import (
     AcknowledgementConflictError, ConsumptionUnavailableError, InvalidStreamMessageError,
 )
 from app.service.review import InvalidReviewTargetError, ReviewPublishError
+from app.service.passport import InvalidPassportError, normalize_passports
 from app.service.stream_deduplication import DuplicateStreamMessageError, StreamDeduplicationUnavailableError
 
 
@@ -37,7 +38,12 @@ class PublishReviewRequest(BaseModel):
     note: str = Field(max_length=10000, description="注册中心审核意见，允许为空字符串。")
     reviewer: str = Field(min_length=1, max_length=200, description="注册中心审核员姓名或代号。")
 
-    passport: str = Field(description="最终审核结果 passport，字符串必填，允许为空；中间件原样转发。")
+    passport: list[StrictStr] | StrictStr = Field(description="通行证字符串数组，必填；每项非空白，空数组表示未签发。兼容旧单字符串，统一转为数组；旧空字符串转为空数组。")
+
+    @field_validator("passport")
+    @classmethod
+    def normalize_passport(cls, value: str | list[str]) -> list[str]:
+        return normalize_passports(value)
 
     @field_validator("request_id", "target_platform_code", "reviewer")
     @classmethod
@@ -77,6 +83,8 @@ async def publish_review(body: PublishReviewRequest, request: Request,
         raise HTTPException(403, "仅注册中心可以提交审核反馈") from None
     except InvalidReviewTargetError:
         raise HTTPException(422, "target_platform_code 必须为配置中的子平台代号") from None
+    except InvalidPassportError as error:
+        raise HTTPException(422, str(error)) from None
     except DuplicateStreamMessageError as error:
         raise HTTPException(409, {"message": "该子平台的 request_id 已有尚未确认的入库审核反馈",
                                   "message_id": error.message_id, "offset": error.offset}) from None
@@ -92,7 +100,7 @@ async def publish_review(body: PublishReviewRequest, request: Request,
 
 class PullReviewResponse(BaseModel):
     offset: int = Field(description="反馈在流中的位置，仅供观察，不接受客户端用其推进进度。")
-    message: dict = Field(description="属于当前认证平台的完整审核反馈消息。")
+    message: dict = Field(description="属于当前认证平台的完整审核反馈消息；存在 passport 时统一返回字符串数组，历史缺失字段不补值。")
 
 
 class AcknowledgeReviewResponse(BaseModel):

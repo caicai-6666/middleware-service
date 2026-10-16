@@ -1,4 +1,4 @@
-"""启动时确保业务流存在，不删除或重建已有数据。"""
+"""后端启动时校验容器已准备业务流，不负责创建或修改流。"""
 
 import asyncio
 
@@ -7,13 +7,14 @@ from app.infrastructure.rabbitmq_stream import RabbitMQStreamFactory
 from app.config.stream import StreamSettings
 
 
-async def initialize_streams(settings: StreamSettings) -> None:
-    # 限制启动等待时间；连接、权限和声明异常必须阻止应用进入就绪状态。
+async def verify_streams(settings: StreamSettings) -> None:
+    # 容器负责初始化；流缺失或无法连接时阻止后端进入就绪状态，不隐式补建。
     async with asyncio.timeout(30):
         async with RabbitMQStreamFactory(settings).producer() as producer:
-            # exists_ok 同时处理重复启动及多个初始化请求之间的创建竞争。
-            # 不声明新的保留参数，避免暗中改变已有流的数据保留约定。
-            await producer.create_stream(settings.request_stream, exists_ok=True)
-            await producer.create_stream(settings.result_stream, exists_ok=True)
-            await producer.create_stream(settings.deletion_request_stream, exists_ok=True)
-            await producer.create_stream(settings.deletion_result_stream, exists_ok=True)
+            missing = []
+            for name in (settings.request_stream, settings.result_stream,
+                         settings.deletion_request_stream, settings.deletion_result_stream):
+                if not await producer.stream_exists(name):
+                    missing.append(name)
+            if missing:
+                raise RuntimeError(f"RabbitMQ 业务流尚未初始化：{', '.join(missing)}")
