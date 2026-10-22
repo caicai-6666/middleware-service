@@ -1,18 +1,19 @@
-.git
-.idea
-.env
-.env.*
+# 镜像仅包含运行所需源码和依赖声明，不依赖本机未提交文件。
+**
+!Dockerfile
+!.dockerignore
+!requirement.txt
+!app/
+!app/**
+
+# 即使出现在源码目录，也不把本机配置、缓存和 IDE 文件写入镜像。
+**/.env
+**/.env.*
 **/platform.yaml
-.venv
+**/.venv
+**/venv
 **/__pycache__
 **/*.py[cod]
-.DS_Store
-description
-experiment
-tests
-AGENTS.md
-README.md
-
-data/ingestion-request/file/
-data/deletion-request/file/
-data/rabbitmq-dev/
+**/.DS_Store
+**/.idea
+**/.vscode

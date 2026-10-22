@@ -34,7 +34,7 @@ python -m app.main
 python -m uvicorn app.main:app --host 127.0.0.1 --port 22000 --reload --reload-dir app
 ```
 
-使用模块方式启动，不使用 `python app/main.py`。服务启动需要有效的平台配置与 RabbitMQ 连接配置，RabbitMQ 容器须已准备四个业务流，后端仅检查存在性。默认读取项目根目录的 `data/platform-config/platform.yaml`，密钥直接填写在 YAML 中；可通过 `PLATFORM_CONFIG_PATH` 覆盖路径。
+使用模块方式启动，不使用 `python app/main.py`。服务启动需要有效的平台配置与 RabbitMQ 连接配置，RabbitMQ 容器须已准备五个业务流，后端仅检查存在性。默认读取项目根目录的 `data/platform-config/platform.yaml`，密钥直接填写在 YAML 中；可通过 `PLATFORM_CONFIG_PATH` 覆盖路径。
 
 热重载会重启服务进程，重新执行 lifespan，内存登录会话和待确认缓存会重建；子平台需要重新登录，未确认消息从 RabbitMQ 已保存进度恢复。平台 YAML 与 `.env` 不在 Python 代码监听范围内，修改后需要手动重启。容器仍使用 Dockerfile 的生产启动命令，不启用热重载。
 

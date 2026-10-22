@@ -1,4 +1,4 @@
-"""两个业务流共用的有界批量读取与消费契约。"""
+"""业务流共用的有界批量读取与消费契约。"""
 
 import asyncio
 from collections import deque

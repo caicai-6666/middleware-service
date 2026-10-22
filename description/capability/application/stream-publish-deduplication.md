@@ -36,7 +36,7 @@
 | `app/service/result_message.py` | 确认 registry 权限和目标有效性，以目标代码及原请求 ID 去重，发布并保留确认不确定占位。 |
 | `app/infrastructure/stream_stats.py` | 补充原生 StreamStats、ResolveOffsetSpec 查询和最后一个业务块读取，确定扫描终点。 |
 | `app/router/ingestion.py`、`app/router/deletion.py`、`app/router/ingestion_review.py`、`app/router/deletion_review.py` | 重复转换为 409，无法可靠判断转换为 503。 |
-| `app/main.py` | 为四个 publish 分别装配独立的共享去重服务。 |
+| `app/main.py` | 为五个 publish 分别装配独立的共享去重服务。 |
 
 申请流首次恢复从 registry 的确认 offset 下一条开始；结果流首次恢复从位置 0 扫描全部保留消息，再按各目标平台自己的确认进度筛除已完成记录。不能从当前目标的 offset 开始恢复结果流全局索引，否则会漏掉其他平台位于较小 offset 的未确认消息。
 
@@ -80,3 +80,5 @@ Producer 的发布序号不是流 offset。发布获得确认后保留 message_i
 一次刷新总超时 30 秒，订阅读取扫描终点最多等待 15 秒。首次恢复开销与需要检查的保留消息量相关：申请流检查未确认区间，结果流检查整个保留区间。后续增量检查新增消息和目标平台进度；积压导致超时时返回 503，不降级为放行。
 
 验证覆盖同键并发、跨流和跨平台隔离、确认 offset 等于消息位置、其他平台较大 offset 不解除限制、旧记录恢复、投递不确定状态及 409/503 响应。申请及入库结果的真实 RabbitMQ 验证使用三个独立合成流、合成平台会话和临时文件，检查 publish/pull/ack；删除结果另用独立临时流验证 HTTP publish/pull/ack、目标进度隔离、重建恢复及确认后重新发布。测试完成后关闭客户端并删除测试流和文件，不写入正式业务流。
+
+文件权限调整流使用 `(target_platform_code, source_id)` 去重，按目标子平台在该流的进度判断；未确认前不能以不同 file_level 覆盖。字段与消费边界见[文件权限调整契约](../../architecture/data/file-permission-adjustment.md)。

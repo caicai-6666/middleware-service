@@ -1,32 +1,40 @@
-# 默认忽略全部，仅放行下方明确列出的目录和文件。
+# 默认忽略全部，仅保存部署源码、项目文档、配置示例和必要目录占位。
 *
 
-# 显式允许 app 包纳入版本控制；下方仍排除敏感配置和 Python 缓存。
 !/app/
 !/app/**
+!/description/
+!/description/**
 
-.env
-.venv/
-__pycache__/
-*.py[cod]
-.DS_Store
-
-# data 仅保留直接子目录的占位文件，忽略业务文件和更深层目录。
+# data 只保存直接子目录的 .gitkeep，不提交实际配置、附件或本机容器文件。
 !/data/
 /data/*
 !/data/*/
 /data/*/*
 !/data/*/.gitkeep
 
-# description 目录及所有层级的内容均纳入版本控制。
-!/description/
-!/description/**
-
-# 项目根目录的构建、配置示例及开发规范文件。
+# 项目根目录中需要版本控制的文件。
 !/.dockerignore
-!/.env.example
 !/.gitignore
 !/AGENTS.md
 !/Dockerfile
 !/README.md
 !/requirement.txt
+
+# 通用排除必须位于目录白名单之后，防止后续放行覆盖这些规则。
+.env
+.env.*
+platform.yaml
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+.idea/
+.vscode/
+
+# 仅放行根目录环境模板；实际环境文件始终忽略。
+!/.env.example

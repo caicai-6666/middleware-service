@@ -21,6 +21,7 @@ class Platform(BaseModel):
     name: str = Field(min_length=1, description="平台中文展示名称。")
     description: str = Field(min_length=1, description="平台用途说明，不参与权限判定。")
     secret: SecretStr = Field(exclude=True, repr=False, description="YAML 中配置的平台密钥，不对外序列化。")
+    show_in_list: bool = Field(default=True, description="是否在平台列表接口中展示；仅影响列表可见性，不改变平台登录或业务权限。")
 
 
 class _PlatformFile(BaseModel):

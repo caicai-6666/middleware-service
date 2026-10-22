@@ -24,12 +24,14 @@ class ReviewPublishError(Exception):
 
 class ResultMessagePublisher:
     def __init__(self, sessions: PlatformSessionService, stream: str,
-                 platforms: Mapping[str, Platform], registry_code: str, *, deduplicator):
+                 platforms: Mapping[str, Platform], registry_code: str, *, deduplicator, reference_field: str = "request_id"):
         self._sessions = sessions
         self._stream = stream
         self._platforms = platforms
         self._registry_code = registry_code
         self._deduplicator = deduplicator
+        # 结果流沿用 request_id；文件权限调整以 source_id 关联目标平台文件。
+        self._reference_field = reference_field
 
     async def submit(self, platform_code: str, access_token: str, *, request_id: str,
                      target_platform_code: str, fields: Mapping[str, object]) -> str:
@@ -45,7 +47,7 @@ class ResultMessagePublisher:
             message = {
                 **fields,
                 "message_id": message_id,
-                "request_id": request_id,
+                self._reference_field: request_id,
                 "target_platform_code": target_platform_code,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }

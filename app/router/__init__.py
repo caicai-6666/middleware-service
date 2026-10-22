@@ -13,6 +13,8 @@ from app.router.deletion import router as deletion_router
 from app.router.deletion_review import router as deletion_review_router
 
 from app.router.resource import router as resource_router
+from app.router.user import router as user_router
+from app.router.file_permission import router as file_permission_router
 
 router = APIRouter()
 router.include_router(health_router)
@@ -22,3 +24,6 @@ router.include_router(ingestion_review_router)
 router.include_router(deletion_router)
 router.include_router(deletion_review_router)
 router.include_router(resource_router)
+router.include_router(user_router)
+
+router.include_router(file_permission_router)

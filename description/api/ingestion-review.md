@@ -43,8 +43,11 @@ Body 为 JSON，无 path 或 query 参数。
 | `note` | string | 是 | 审核意见，最多 10000 字符，允许空字符串。 |
 | `reviewer` | string | 是 | 注册中心审核员姓名或代号，1–200 字符，不能仅包含空白。 |
 | `passport` | string[]（兼容 string） | 是 | 通行证集合，每项非空白；允许 `[]` 表示未签发。旧单字符串自动转为单元素数组，旧空字符串转为 `[]`。 |
+| `file_level` | integer | 是 | 文件级别，由 registry 提供，不限制取值范围；拒绝布尔值、字符串、小数和 null。 |
 
 JSON 中的 `"note": ""` 合法，写入消息时原样保留。该字段仍必填，省略、传入 `null` 或超过长度限制时返回 `422`。
+
+file_level 为整份文件在本次结果中的级别，适用于本消息的全部通行证；即使 passport 为 []，新发布仍必须提供 file_level。
 
 通行证数量不影响消息粒度，一条审核结果携带多个通行证，仍按同一 message_id 确认。值不裁剪、不去重，具体校验及历史兼容见[通行证集合契约](../architecture/data/passport.md)。
 
@@ -61,7 +64,7 @@ JSON 中的 `"note": ""` 合法，写入消息时原样保留。该字段仍必�
 - `401`：令牌缺失、无效或过期，包括等待发布期间发现会话已失效。
 - `403`：调用方不是注册中心，或没有目标流发布权限。
 - `409`：同一目标子平台、同一 request_id 的反馈尚未被该子平台确认。
-- `422`：请求结构不合法、必填字段为空白，或目标平台不存在/为注册中心。
+- `422`：请求结构不合法、必填字段缺失或为空白、file_level 不是严格整数，或目标平台不存在/为注册中心。
 - `503`：会话的 Stream 资源不可用、发布未获确认，或无法可靠完成去重判断。
 
 重复提交时返回旧反馈标识及其 offset；尚未扫描到真实 offset 时为 null：
@@ -86,7 +89,7 @@ JSON 中的 `"note": ""` 合法，写入消息时原样保留。该字段仍必�
 curl -X POST "http://127.0.0.1:22000/middleware-service/api/ingestion-results/publish" \
   -H "Authorization: Bearer <注册中心 access_token>" \
   -H 'Content-Type: application/json' \
-  -d '{"request_id":"原入库消息标识","target_platform_code":"contract-pheno","note":"审核通过","reviewer":"张三","passport":["通行证-001","通行证-002"]}'
+  -d '{"request_id":"原入库消息标识","target_platform_code":"contract-pheno","note":"审核通过","reviewer":"张三","passport":["通行证-001","通行证-002"],"file_level":2}'
 ```
 
 ### 行为与边界
@@ -97,7 +100,7 @@ curl -X POST "http://127.0.0.1:22000/middleware-service/api/ingestion-results/pu
 
 本接口不确认原入库请求、不删除文件，也不写入消费 offset；原请求处理完毕后仍需调用入库流的 ack。反馈发布与原请求 ack 是两个独立操作，不具备跨操作事务。
 
-发布前按 `(target_platform_code, request_id)` 精确去重，依据接收子平台在本结果流的 `<target_platform_code>:<stream>` 确认 offset。只要旧反馈的 offset 大于该子平台确认进度，便拒绝再次发布；registry 的进度或其他子平台更大的进度均不能解除限制。仅 pull 不解除限制，该目标 ack 到旧反馈后允许重发并生成新标识；相同 request_id 发给不同目标不冲突。修改 note、reviewer 或 passport 不能绕过未确认限制。
+发布前按 `(target_platform_code, request_id)` 精确去重，依据接收子平台在本结果流的 `<target_platform_code>:<stream>` 确认 offset。只要旧反馈的 offset 大于该子平台确认进度，便拒绝再次发布；registry 的进度或其他子平台更大的进度均不能解除限制。仅 pull 不解除限制，该目标 ack 到旧反馈后允许重发并生成新标识；相同 request_id 发给不同目标不冲突。修改 note、reviewer、passport 或 file_level 不能绕过未确认限制。
 
 发布超时可能是确认丢失，不能视为消息一定未写入；保留不确定占位，后续找到消息则按真实位置判断，始终未找到时返回 503，不自动重发。进程重启可从流恢复可识别的反馈，原有单进程边界保持不变；完整机制见[流发布去重服务](../capability/application/stream-publish-deduplication.md)。当前不提供投递结果查询接口或跨系统事务。
 
@@ -129,6 +132,7 @@ Header：`Authorization: Bearer <access_token>`，必须为有效子平台会话
     "note": "审核通过",
     "reviewer": "张三",
     "passport": ["通行证-001", "通行证-002"],
+    "file_level": 2,
     "created_at": "2026-10-09T08:00:00+00:00"
   }
 }
@@ -153,7 +157,7 @@ curl -X POST "http://127.0.0.1:22000/middleware-service/api/ingestion-results/pu
 
 中间件内部扫描共享流，只向调用方返回 `target_platform_code` 与认证平台代号完全一致的消息。第一条本平台消息之前的连续无关消息可以自动提交到本平台的消费进度，不影响其他平台。
 
-pull 返回完整消息，passport 统一规范为字符串数组；历史单字符串转为单元素数组，历史空字符串转为 `[]`，历史消息缺失该字段时不补值。不改写原 MQ 消息或消费位置。
+pull 返回完整消息，file_level 原样返回，历史消息缺少时不补值；passport 统一规范为字符串数组；历史单字符串转为单元素数组，历史空字符串转为 `[]`，历史消息缺失该字段时不补值。不改写原 MQ 消息或消费位置。
 
 存在待确认反馈时，重复或并发 pull 返回同一条，不继续扫描、不越过它推进 offset。缓存耗尽后才读取下一批；本批全为其他平台消息时，保存跳过进度后返回 204。消费并非恰好一次，调用方应按反馈 `message_id` 幂等处理。
 

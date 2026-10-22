@@ -2,6 +2,9 @@
 # 基于 asyncio 的 RabbitMQ Stream 专用协议客户端。
 rstream==1.1.0
 
+# asyncio Redis 客户端，内置连接池。
+redis==8.1.0
+
 # HTTP API 框架。
 fastapi==0.142.4
 

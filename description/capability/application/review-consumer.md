@@ -2,7 +2,7 @@
 
 ## 用途与职责
 
-`app/service/review_consumer.py` 的 `ReviewConsumerService` 负责子平台结果过滤、有界缓存、逐条交付和消费确认。入库与删除结果共用该算法，使用独立服务实例、缓存及各自流中的消费进度。接口约定见[入库审核 API](../../api/ingestion-review.md)和[删除审批 API](../../api/deletion-review.md)，消息字段分别见[入库结果契约](../../architecture/data/review-result.md)和[删除结果契约](../../architecture/data/deletion-result.md)。
+`app/service/review_consumer.py` 的 `ReviewConsumerService` 负责子平台结果过滤、有界缓存、逐条交付和消费确认。入库、删除结果与文件权限调整共用该算法，使用独立服务实例、缓存及各自流中的消费进度。接口约定见[入库审核 API](../../api/ingestion-review.md)、[删除审批 API](../../api/deletion-review.md)和[文件权限调整 API](../../api/file-permission.md)，消息字段分别见[入库结果契约](../../architecture/data/review-result.md)和[删除结果契约](../../architecture/data/deletion-result.md)。
 
 ---
 
@@ -28,7 +28,7 @@
 
 ## 配置与依赖
 
-在 `app/main.py` 启动时分别装配到 `app.state.review_consumer` 和 `app.state.deletion_review_consumer`，复用平台会话管理器、角色资源映射和启动时的 Stream 配置。同一平台的两个结果流可以复用 Consumer 客户端，但订阅、缓存、待确认记录及 `<platform_code>:<stream>` 消费名称各自独立；失活回调清理两个实例的内存状态。
+在 `app/main.py` 启动时分别装配到 `app.state.review_consumer` 、`app.state.deletion_review_consumer` 和 `app.state.file_permission_consumer`，复用平台会话管理器、角色资源映射和启动时的 Stream 配置。同一平台的入库结果、删除结果和文件权限调整流可以复用 Consumer 客户端，但订阅、缓存、待确认记录及 `<platform_code>:<stream>` 消费名称各自独立；失活回调清理三个实例的内存状态。
 
 | 环境变量 | 默认值 | 作用 |
 | --- | --- | --- |
@@ -36,6 +36,8 @@
 | `REVIEW_CACHE_MAX_BYTES` | `4194304` | 每个平台在入库结果流一批缓存的原始消息字节上限。 |
 | `DELETION_REVIEW_CACHE_MAX_MESSAGES` | `100` | 每个平台在删除结果流一批缓存的消息数量上限。 |
 | `DELETION_REVIEW_CACHE_MAX_BYTES` | `4194304` | 每个平台在删除结果流一批缓存的原始消息字节上限。 |
+| `FILE_PERMISSION_CACHE_MAX_MESSAGES` | `100` | 每个平台在文件权限调整流一批缓存的消息数量上限。 |
+| `FILE_PERMISSION_CACHE_MAX_BYTES` | `4194304` | 每个平台在文件权限调整流一批缓存的原始消息字节上限。 |
 
 配置由 `app/config/consumer.py` 读取，环境变量覆盖项目根 `.env`，只接受正整数。`.env.example` 提供示例；容器部署可通过环境变量注入。与 `INGESTION_CACHE_*` 独立配置。
 
@@ -50,3 +52,8 @@
 结果 ack 不触碰文件，也不删除共享流消息。删除审批 approved 为 true 时由子平台完成实际删除再确认，为 false 时记录拒绝后确认；中间件不验证其业务动作。最近一次重复 ack 的成功记录只存在内存中，不是持久化业务去重。
 
 测试覆盖双平台交错过滤、待确认屏障、无关批次推进、提交及回查失败、重启恢复、资源回收、坏消息及超限处理、HTTP 权限和错误码。真实 RabbitMQ 联调使用独立临时流，验证发布、独立 offset 与重建服务后的恢复，结束后删除临时流。
+
+
+## 入库审核文件级别
+
+入库结果的新消息包含 file_level，消费层原样交付，历史消息缺失时不补默认值，不改变共享流过滤、待确认屏障或 offset。字段约束以[审核反馈消息契约](../../architecture/data/review-result.md#文件级别与历史兼容)为准，删除结果不增加该字段。

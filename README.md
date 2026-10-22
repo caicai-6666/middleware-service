@@ -9,8 +9,10 @@
 ## 当前能力
 
 - **平台认证**：启动时将 YAML 平台白名单加载至内存，通过平台代号和密钥登录；后续接口统一使用 Bearer Token 识别调用平台。
+- **用户缓存**：knowledge-accumulation 与注册中心可维护用户总表，knowledge-accumulation 写入成功登录缓存，注册中心维护单用户增量资料；以 `userid` 为索引存入 Redis，登录缓存按统一 TTL 自动失效，其他平台按用户 `access_token` 查询有效登录并续期；详见[用户 Redis 缓存](description/capability/application/user-cache.md)。
+- **平台管理员缓存**：以平台代码维护多个管理员 userid，使用 Redis Set 去重，提供 knowledge-accumulation 与注册中心可调用的全量更新接口、注册中心专用的增删接口、当前平台管理员列表和内部成员判断方法，见[平台管理员缓存](description/capability/application/platform-admin-cache.md)。
 - **会话保活**：心跳延长会话有效期，定期清理失活平台，并释放其 Stream 客户端资源；同一平台仅允许一个有效登录会话。
-- **消息流转**：支持入库申请、入库审核结果、删除申请和删除审批结果四个流，每个流提供 `publish`、`pull`、`ack` 接口。
+- **消息流转**：支持入库申请、入库审核结果、删除申请、删除审批结果和文件权限调整五个流，每个流提供 `publish`、`pull`、`ack` 接口。
 - **消费确认**：有界批量预取、逐条交付；处理完成后显式确认，由 RabbitMQ 保存消费进度，结果流按目标平台过滤。
 - **发布去重**：依据业务标识和实际接收方的消费进度，拒绝尚未确认消息的重复发布。
 - **附件转存**：入库文件保存在本地临时目录，消息仅保存文件引用；registry 可下载文件，确认入库请求后清理附件。新删除申请无需上传文件。
@@ -19,7 +21,7 @@
 
 ## 技术与目录
 
-运行环境为 **Python 3.12**，主要依赖 FastAPI、Uvicorn、异步 Stream 客户端 `rstream` 和 PyYAML，版本固定在 [requirement.txt](requirement.txt)。当前发布去重实现依赖 **RabbitMQ 4.3 及以上版本**的 Stream 协议能力。
+运行环境为 **Python 3.12**，主要依赖 FastAPI、Uvicorn、异步 Stream 客户端 `rstream`、异步 Redis 客户端 `redis` 和 PyYAML，版本固定在 [requirement.txt](requirement.txt)。当前发布去重实现依赖 **RabbitMQ 4.3 及以上版本**的 Stream 协议能力。
 
 ```text
 middleware-service/
@@ -27,20 +29,21 @@ middleware-service/
 │   ├── main.py                  # 应用装配、生命周期与开发启动入口
 │   ├── router/                  # HTTP 路由与认证依赖
 │   ├── service/                 # 会话、发布、消费和确认逻辑
-│   ├── infrastructure/          # RabbitMQ Stream 客户端工厂
+│   ├── infrastructure/          # RabbitMQ 与 Redis 异步适配
 │   └── config/                  # 配置读取与校验
 ├── data/
 │   ├── platform-config/         # 本机平台 YAML 配置
 │   ├── ingestion-request/       # file/ 保存入库临时附件
 │   ├── deletion-request/        # file/ 仅兼容历史删除附件
-│   └── rabbitmq-dev/            # 本机自行维护的 RabbitMQ 开发配置
+│   ├── rabbitmq-dev/            # 本机自行维护的 RabbitMQ 开发配置
+│   └── redis-dev/               # 本机自行维护的 Redis 开发配置
 ├── description/                 # 接口、设计与运行文档
 ├── .env.example                 # 本机环境配置模板
 ├── Dockerfile                   # 后端生产镜像
 └── requirement.txt              # Python 依赖
 ```
 
-`data/` 仅将直接子目录的 `.gitkeep` 纳入版本控制；实际配置、附件和本机 RabbitMQ 开发文件不随仓库分发。实际 `.env` 也不纳入 Git。
+`data/` 仅将直接子目录的 `.gitkeep` 纳入版本控制；实际配置、附件和本机 RabbitMQ 开发文件不随仓库分发。实际 `.env` 也不纳入 Git。仓库采用默认忽略的白名单，只保存 app 源码、description 文档、根目录构建与配置示例，以及这些目录占位；tests、scripts、experiment 和 IDE 文件均不提交。镜像仅复制运行源码与依赖声明，data 中的附件目录由 Dockerfile 创建。
 
 ---
 
@@ -54,6 +57,9 @@ middleware-service/
 | `ingestion-results` | registry | 目标子平台 | `/middleware-service/api/ingestion-results` |
 | `deletion-requests` | 子平台 | registry | `/middleware-service/api/deletion-requests` |
 | `deletion-results` | registry | 目标子平台 | `/middleware-service/api/deletion-results` |
+| `file-permission-adjustments` | registry | 目标子平台 | `/middleware-service/api/file-permission-adjustments` |
+
+文件权限调整的请求字段与消费约定见[文件权限调整 API](description/api/file-permission.md)，流名可通过 `RABBITMQ_FILE_PERMISSION_STREAM` 配置。
 
 典型接入流程：
 
@@ -105,6 +111,8 @@ platforms:
     secret: "replace-with-platform-a-secret"
 ```
 
+平台表项可增加 `show_in_list: false`，将该平台从 `GET /middleware-service/api/platform/list` 隐藏；默认 true，不影响登录和消息权限。修改 YAML 后重启生效。
+
 示例密钥必须替换，各平台代号和密钥均须唯一。`RABBITMQ_REGISTRY_PLATFORM_CODE` 必须与注册中心的 `code` 一致。若配置位于其他位置，在启动进程前设置环境变量 `PLATFORM_CONFIG_PATH`，指定 YAML 路径。
 
 常用配置见下表，完整模板以 [.env.example](.env.example) 为准。
@@ -114,18 +122,21 @@ platforms:
 | `PLATFORM_SESSION_TTL_SECONDS` | `90`，会话有效期，单位秒 |
 | `PLATFORM_HEARTBEAT_INTERVAL_SECONDS` | `30`，建议心跳间隔，必须小于会话有效期 |
 | `PLATFORM_SESSION_CLEANUP_INTERVAL_SECONDS` | `10`，失活资源清理周期，单位秒 |
+| `USER_CACHE_TTL_SECONDS` | `90`，Redis 用户登录有效期，单位秒 |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | Redis 连接地址和密码，启动时必须可连接 |
+| `REDIS_DB` / `REDIS_KEY_PREFIX` / `REDIS_MAX_CONNECTIONS` | 默认 `0` / `middleware-service` / `20` |
 | `RABBITMQ_HOST` / `RABBITMQ_PORT` | 本机默认 `localhost:5552` |
 | `RABBITMQ_USER` / `RABBITMQ_PASSWORD` / `RABBITMQ_VHOST` | RabbitMQ 连接身份及虚拟主机 |
 | `RABBITMQ_REGISTRY_PLATFORM_CODE` | 默认 `registry`，决定注册中心角色 |
-| `*_CACHE_MAX_MESSAGES` / `*_CACHE_MAX_BYTES` | 四类消费缓存分别配置，默认每平台每流 100 条、4 MiB 原始消息 |
+| `*_CACHE_MAX_MESSAGES` / `*_CACHE_MAX_BYTES` | 五类消费缓存分别配置，默认每平台每流 100 条、4 MiB 原始消息 |
 
 `RABBITMQ_STREAM_MAX_AGE` 和 `RABBITMQ_STREAM_MAX_LENGTH_BYTES` 当前仅预留配置，尚未接入流保留策略，不会自动限制消息保存期限或容量。
 
 平台 YAML 在启动时读取一次。修改 YAML 或 `.env` 后需重启服务，具体规则见[平台身份配置](description/capability/application/platform-config.md)。
 
-### 3. 准备 RabbitMQ
+### 3. 准备 RabbitMQ 和 Redis
 
-启动后端前，RabbitMQ 必须可连接，已启用 Stream 插件，且上述四个流已经存在。**流由 RabbitMQ 容器初始化，后端启动只做校验，不负责创建。**
+启动后端前，RabbitMQ 必须可连接，已启用 Stream 插件，且上述五个流已经存在。**流由 RabbitMQ 容器初始化，后端启动只做校验，不负责创建。**
 
 当前工作区的本机开发配置若已准备在 `data/rabbitmq-dev/`，可执行：
 
@@ -135,13 +146,21 @@ docker compose --env-file .env -f data/rabbitmq-dev/docker-compose.yml up -d --b
 
 首次拉取仓库不会获得该目录内的开发配置，需要另行准备或连接已初始化的 RabbitMQ。配置组成及地址要求见 [RabbitMQ Streams 本地开发环境](description/capability/infrastructure/rabbitmq-stream.md)，容器初始化规则见[业务流启动初始化](description/capability/infrastructure/stream-initialization.md)。
 
+Redis 也必须可连接。填写 `.env` 中的 Redis 密码；当前工作区本机配置已准备在 `data/redis-dev/` 时执行：
+
+```bash
+docker compose --env-file .env -f data/redis-dev/docker-compose.yml up -d --build --wait redis
+```
+
+该开发配置不随 Git 分发，依赖同级 deploy 的 `redis/` 构建目录；首次拉取后的准备方式见 [Redis 部署](description/capability/infrastructure/redis.md)。
+
 ### 4. 启动与验证
 
 ```bash
 python -m app.main
 ```
 
-本地监听 `127.0.0.1:22000`，支持 `app/` 下 Python 代码热重载。重载会清空内存会话，调用平台需要重新登录。
+本地监听 `127.0.0.1:22000`，支持 `app/` 下 Python 代码热重载。重载会清空内存会话，调用平台需要重新登录，Redis 用户资料和仍有效的用户登录不主动清空。
 
 ```bash
 curl http://127.0.0.1:22000/middleware-service/api/health
@@ -162,16 +181,18 @@ curl http://127.0.0.1:22000/middleware-service/api/health
 
 ## 容器部署
 
-本项目只维护后端 `Dockerfile`；生产 Compose、环境模板、平台配置模板及 RabbitMQ 镜像由独立的 `middleware-service-deploy` 项目维护。生产目录约定如下：
+本项目只维护后端 `Dockerfile`；生产 Compose、环境模板、平台配置模板及 RabbitMQ、Redis 镜像由独立的 `middleware-service-deploy` 项目维护，部署操作入口为该项目的 README.md。生产目录约定如下：
 
 ```text
 middleware-service-deploy/
+├── README.md                    # 部署步骤、升级与持久卷说明
 ├── docker-compose.yml
 ├── .env.example
 ├── .env
 ├── platform.yaml.example
 ├── platform.yaml
 ├── rabbitmq/                    # RabbitMQ Dockerfile、初始化及配置
+├── redis/                       # Redis Dockerfile、启动脚本及配置
 └── middleware-service/          # 将本仓库拉取到这里
     ├── Dockerfile
     └── app/
@@ -186,9 +207,11 @@ cp platform.yaml.example platform.yaml
 docker compose up -d --build --wait
 ```
 
+Compose 同时部署 Redis，启用密码认证、AOF 持久化和独立命名卷，仅通过内部地址 `redis:6379` 访问。已有部署需在 `.env` 中补充 `REDIS_PASSWORD`；后端等待 Redis 健康后启动。后端已使用 Redis 保存用户资料及登录状态，具体配置见 [Redis 容器部署](description/capability/infrastructure/redis.md)。
+
 后端容器工作目录为 `/workspace`，监听 `8000`，默认单 worker、无热重载。平台 YAML 只读挂载至 `/data/platform-config/platform.yaml`，由 `PLATFORM_CONFIG_PATH` 指定。Compose 统一向 RabbitMQ 与后端注入凭据，后端通过内部地址 `rabbitmq:5552` 连接；生产配置不向宿主机发布 RabbitMQ 端口。
 
-RabbitMQ 容器幂等初始化四个流并通过健康检查后，后端再启动。RabbitMQ 数据、入库临时文件和历史删除附件分别使用持久卷。完整构建、挂载与账号维护说明见[应用容器镜像](description/capability/application/container-image.md)。
+RabbitMQ 容器幂等初始化五个流并通过健康检查后，后端再启动。已有部署增加流时需先重建并启动 RabbitMQ 镜像，再更新后端；已有消息及 offset 保留。RabbitMQ 数据、入库临时文件和历史删除附件分别使用持久卷。完整构建、挂载与账号维护说明见[应用容器镜像](description/capability/application/container-image.md)。
 
 ## 运行边界
 

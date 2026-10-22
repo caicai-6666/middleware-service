@@ -20,6 +20,7 @@ class StreamSettings:
     registry_platform_code: str = "registry"
     deletion_request_stream: str = "deletion-requests"
     deletion_result_stream: str = "deletion-results"
+    file_permission_stream: str = "file-permission-adjustments"
 
 
 def load_stream_settings() -> StreamSettings:
@@ -46,9 +47,10 @@ def load_stream_settings() -> StreamSettings:
         result_stream=value("RABBITMQ_RESULT_STREAM", "ingestion-results"),
         deletion_request_stream=value("RABBITMQ_DELETION_REQUEST_STREAM", "deletion-requests"),
         deletion_result_stream=value("RABBITMQ_DELETION_RESULT_STREAM", "deletion-results"),
+        file_permission_stream=value("RABBITMQ_FILE_PERMISSION_STREAM", "file-permission-adjustments"),
     )
     names = (settings.request_stream, settings.result_stream,
-             settings.deletion_request_stream, settings.deletion_result_stream)
+             settings.deletion_request_stream, settings.deletion_result_stream, settings.file_permission_stream)
     if len(set(names)) != len(names):
-        raise ValueError("四个业务流名称不能相同。")
+        raise ValueError("五个业务流名称不能相同。")
     return settings

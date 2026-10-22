@@ -13,7 +13,8 @@ async def verify_streams(settings: StreamSettings) -> None:
         async with RabbitMQStreamFactory(settings).producer() as producer:
             missing = []
             for name in (settings.request_stream, settings.result_stream,
-                         settings.deletion_request_stream, settings.deletion_result_stream):
+                         settings.deletion_request_stream, settings.deletion_result_stream,
+                         settings.file_permission_stream):
                 if not await producer.stream_exists(name):
                     missing.append(name)
             if missing:

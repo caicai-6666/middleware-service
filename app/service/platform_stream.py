@@ -41,8 +41,8 @@ class PlatformStreamManager:
                 consume_stream=consume_stream,
                 consumer_name=f"{code}:{consume_stream}",
                 # 一个客户端支持多个流，业务流权限按平台角色明确列举。
-                publish_streams=frozenset((settings.result_stream, settings.deletion_result_stream)
+                publish_streams=frozenset((settings.result_stream, settings.deletion_result_stream, settings.file_permission_stream)
                                          if registry else (settings.request_stream, settings.deletion_request_stream)),
                 consume_streams=frozenset((settings.request_stream, settings.deletion_request_stream)
-                                         if registry else (settings.result_stream, settings.deletion_result_stream)),
+                                         if registry else (settings.result_stream, settings.deletion_result_stream, settings.file_permission_stream)),
             )

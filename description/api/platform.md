@@ -1,6 +1,6 @@
-# 平台认证 API
+# 平台 API
 
-平台使用启动时加载的 YAML 白名单密钥登录，获取内存会话令牌。
+平台使用启动时加载的 YAML 白名单密钥登录，获取内存会话令牌；knowledge-accumulation 与注册中心可全量更新各平台的多管理员集合，注册中心可增删单个管理员。
 
 ## 接口目录
 
@@ -9,6 +9,10 @@
 | [平台登录](#平台登录) | `POST` | `/middleware-service/api/platform/login` |
 | [平台心跳](#平台心跳) | `POST` | `/middleware-service/api/platform/heartbeat` |
 | [查询所有平台](#查询所有平台) | `GET` | `/middleware-service/api/platform/list` |
+| [全量更新平台管理员](#全量更新平台管理员) | `POST` | `/middleware-service/api/platform/admins/full-table` |
+| [新增平台管理员](#新增平台管理员) | `POST` | `/middleware-service/api/platform/admins/add` |
+| [删除平台管理员](#删除平台管理员) | `POST` | `/middleware-service/api/platform/admins/remove` |
+| [查询当前平台管理员](#查询当前平台管理员) | `GET` | `/middleware-service/api/platform/admins/list` |
 
 ## 平台登录
 
@@ -68,77 +72,65 @@ curl -X POST 'http://127.0.0.1:8000/middleware-service/api/platform/login' \
 
 登录成功前会建立本平台的 Producer 和 Consumer，最长等待约 30 秒；心跳复用已有客户端，失活后回收资源。同一平台仅允许一个活跃会话；并发登录也只允许一个请求成功。到期即失效，重新登录签发新令牌。服务重启后会话全部失效；平台丢失令牌或登录响应时，需要等旧会话过期再登录。
 
-登录成功后按建议间隔调用[平台心跳](#平台心跳)续期。当前尚未实现登出和消息接口。内存缓存和配置说明见[平台会话服务](../capability/application/platform-session.md)。
+登录成功后按建议间隔调用[平台心跳](#平台心跳)续期。当前尚未实现平台登出接口。内存缓存和配置说明见[平台会话服务](../capability/application/platform-session.md)。
 
 
 ---
 
 ## 平台心跳
 
-`POST /middleware-service/api/platform/heartbeat`，延长当前活跃会话的有效期。
+`POST /middleware-service/api/platform/heartbeat`，仅延长当前调用平台的活跃会话，不同步用户资料、不创建或续期用户登录缓存，也不访问 Redis。
 
 ### 认证方式
 
-使用登录接口签发的令牌，通过 `Authorization: Bearer <access_token>` 请求头认证。
+必填 header `Authorization: Bearer <access_token>`，使用平台登录接口签发的令牌。平台身份完全由统一认证依赖从令牌缓存解析。
 
 ### 请求参数
 
-| 位置 | 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- | --- |
-| header | `Authorization` | string | 是 | `Bearer` 加空格及访问令牌，无默认值。 |
+无 path、query 参数，无需请求体。为兼容旧客户端，可接收 `application/json` 对象中的可选 `platform_code`（string 或 null）；该字段被忽略，不参与身份判定。其他字段一律拒绝。
 
-
-无 path、query 参数，无需请求体。平台身份由统一认证依赖从 access_token 对应的会话缓存解析。
+旧的 `users` 字段已移除，即使为 null 或空数组也返回 422。用户资料通过[用户 API](user.md)维护，成功登录由 knowledge-accumulation 调用[写入用户登录缓存](user.md#写入用户登录缓存)。
 
 ### 成功响应
 
-状态码 `200`，媒体类型 `application/json`，响应头 `Cache-Control: no-store`。
+状态码 `200`，媒体类型 `application/json`，响应头 `Cache-Control: no-store`：
 
 ```json
-{
-  "code": "registry",
-  "expires_in_seconds": 90,
-  "heartbeat_interval_seconds": 30
-}
+{"code":"registry","expires_in_seconds":90,"heartbeat_interval_seconds":30}
 ```
 
-`code` 表示令牌所属平台；`expires_in_seconds` 为本次心跳成功起重新计算的有效秒数；`heartbeat_interval_seconds` 为建议下次发送心跳的间隔秒数。两个时间值读取现有会话配置。
+code 为令牌所属平台；expires_in_seconds 为从此次续期起的有效秒数，heartbeat_interval_seconds 为建议心跳间隔，两者读取平台会话配置，与用户登录 TTL 无关。
 
 ### 错误响应
 
-令牌缺失、认证头格式错误、令牌未知、已过期均返回 `401`，响应头 `WWW-Authenticate: Bearer`，媒体类型 `application/json`：
-
-```json
-{"detail":"令牌缺失、无效、已过期或与平台不匹配"}
-```
-
-
+| 状态码 | 响应 | 条件 |
+| --- | --- | --- |
+| `401` | `{"detail":"令牌缺失、无效或已过期"}` | 统一依赖拒绝令牌，携带 WWW-Authenticate: Bearer。 |
+| `401` | `{"detail":"令牌缺失、无效、已过期或与平台不匹配"}` | 会话服务复核时发现令牌已失效，携带 WWW-Authenticate: Bearer。 |
+| `422` | FastAPI 校验错误列表 | 非法 JSON、字段类型或额外字段，包括旧 users 字段。 |
 
 ### 请求示例
 
-将 `replace-with-access-token` 替换为登录响应中的令牌：
-
 ```bash
-curl -X POST 'http://127.0.0.1:8000/middleware-service/api/platform/heartbeat' \
+curl -X POST 'http://127.0.0.1:22000/middleware-service/api/platform/heartbeat' \
   -H 'Authorization: Bearer replace-with-access-token'
 ```
 
 ### 行为与边界
 
-成功心跳将缓存失效时刻设置为“服务端当前单调时间 + 会话有效期”，不会在旧失效时间上累加。令牌保持不变，无需重新保存令牌。平台代号只从令牌缓存取得，不接受请求体指定身份。
+成功后将平台会话截止时刻设为当前单调时间加有效期，不在旧时间上累加，不轮换令牌。到期立即拒绝，即使后台尚未清理。无效请求不延长平台有效期，收到 401 应重新登录。
 
-到达失效时刻即拒绝续期，即使后台清理尚未运行；收到 `401` 后应使用密钥重新登录。同一平台的心跳、登录和缓存清理共用一把锁，避免失效会话被重新激活。普通令牌查询不会续期。
-
+平台心跳与用户登录生命周期独立。Redis 运行期间发生故障时，此接口仍只访问平台内存会话；这不改变应用启动时对 Redis 的连接校验。
 
 ---
 
 ## 查询所有平台
 
-`GET /middleware-service/api/platform/list`，返回启动时配置的全部平台基本信息及当前会话存活状态。
+`GET /middleware-service/api/platform/list`，返回启动时配置中 show_in_list=true 的平台基本信息及当前会话存活状态。
 
 ### 认证方式
 
-必须携带 `Authorization: Bearer <access_token>`，由统一认证依赖验证。任何活跃平台均可查询全部平台基本信息，不返回密钥或访问令牌。
+必须携带 `Authorization: Bearer <access_token>`，由统一认证依赖验证。任何活跃平台均可查询允许展示的平台基本信息；registry 也遵循相同过滤规则，不返回密钥、访问令牌或 show_in_list 配置字段。
 
 ### 请求参数
 
@@ -179,6 +171,213 @@ curl 'http://127.0.0.1:22000/middleware-service/api/platform/list' \
 
 ### 行为与边界
 
-读取启动时加载的内存配置，不重新读取 YAML。尚未登录、会话过期或正在关闭的服务均显示平台失活。状态按同一个时间点计算，过期但尚未被后台清理的记录也返回 false。
+读取启动时加载的内存配置，不重新读取 YAML。show_in_list 为可选布尔配置，省略时默认 true；false 的平台不出现在响应中，不因其登录或失活改变隐藏规则。全部隐藏时返回 []，额外查询参数不能开启隐藏展示。过滤后仍保留 YAML 顺序。
+
+隐藏只影响此列表，不禁用该平台或改变其认证、业务权限及消息角色。修改配置需要重启服务，配置说明见[平台身份配置](../capability/application/platform-config.md)。
+
+对于允许展示的平台，尚未登录、会话过期或正在关闭时均显示失活。状态按同一个时间点计算，过期但尚未被后台清理的记录也返回 false。
 
 查询不续期、不创建或关闭 RabbitMQ 客户端，不探测子平台网络或业务健康情况；`is_alive` 仅表示本中间件中的登录会话状态。
+
+---
+
+## 全量更新平台管理员
+
+`POST /middleware-service/api/platform/admins/full-table`，由注册中心或 knowledge-accumulation 全量重建当前启动配置中所有平台的管理员集合。
+
+### 认证方式
+
+必填 header `Authorization: Bearer <access_token>`，必须属于 `knowledge-accumulation` 或 `RABBITMQ_REGISTRY_PLATFORM_CODE` 指定的注册中心（默认 registry）；其他平台返回 403。请求中的平台代码是维护目标，不是调用方身份。
+
+### 请求参数
+
+无 path、query 参数，必填 JSON body，禁止额外字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `admins` | object | 是 | 完整管理员映射，键为已配置的 platform_code，值为 userid 字符串数组；无默认值。 |
+| `admins.<platform_code>[]` | string | 是 | 管理员 userid，非空且不全为空白，同一平台内自动去重。数组可为空。 |
+
+未列出的已配置平台清空管理员；`admins: {}` 清空所有已配置平台。未知平台导致整批拒绝。
+
+### 成功响应
+
+状态码 `200`，媒体类型 `application/json`，响应头 `Cache-Control: no-store`：
+
+```json
+{"admin_count":3}
+```
+
+`admin_count` 为本次替换后的管理员关系总数：同一平台内去重，同一个 userid 管理两个平台时分别计数。
+
+### 错误响应
+
+| 状态码 | 响应 | 触发条件 |
+| --- | --- | --- |
+| `401` | `{"detail":"令牌缺失、无效或已过期"}` | 平台令牌缺失或无效，携带 `WWW-Authenticate: Bearer`。 |
+| `403` | `{"detail":"仅注册中心或 knowledge-accumulation 平台可以更新平台管理员总表"}` | 已认证调用方既不是注册中心，也不是 knowledge-accumulation。 |
+| `422` | FastAPI 校验错误列表或业务 `detail` 字符串 | 请求类型、额外字段、平台代码或 userid 不合法。 |
+| `503` | `{"detail":"用户存储服务暂不可用，操作结果可能不确定，请稍后核对"}` | Redis 故障或写入确认结果不确定。 |
+
+### 请求示例
+
+替换令牌和平台代码为实际配置值：
+
+```bash
+curl -X POST 'http://127.0.0.1:22000/middleware-service/api/platform/admins/full-table' \
+  -H 'Authorization: Bearer replace-with-knowledge-accumulation-access-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"admins":{"platform-a":["user-001","user-002"],"platform-b":["user-002"]}}'
+```
+
+### 行为与边界
+
+全批校验通过后，在一个 Redis 事务内替换全部已配置平台集合，失败校验不修改旧数据。与单条增删并发时按 Redis 实际执行顺序生效；事务前完成的增删可被本次完整快照覆盖，事务后执行的增删在新集合上生效。
+
+管理员资料无需预先同步，也无需已登录。操作不修改用户资料、登录 TTL、平台会话或整数权限等级。集合不设置 TTL；缓存结构和生命周期见[平台管理员缓存](../capability/application/platform-admin-cache.md)。
+
+---
+
+## 新增平台管理员
+
+`POST /middleware-service/api/platform/admins/add`，在指定平台的管理员集合中添加一个 userid。
+
+### 认证方式
+
+必填 header `Authorization: Bearer <access_token>`，仅注册中心可以调用。指定 registry 作为目标平台不会让其他调用平台获得写权限；注册中心身份由 `RABBITMQ_REGISTRY_PLATFORM_CODE` 配置。
+
+### 请求参数
+
+无 path、query 参数，必填 JSON body，禁止额外字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `platform_code` | string | 是 | 目标平台代码，格式与 YAML 一致且必须已配置；无默认值。 |
+| `userid` | string | 是 | 要添加的管理员唯一标识，非空且不全为空白；无默认值。 |
+
+### 成功响应
+
+状态码 `200`，媒体类型 `application/json`，响应头 `Cache-Control: no-store`：
+
+```json
+{"platform_code":"platform-a","userid":"user-001","changed":true}
+```
+
+`changed=true` 表示本次确实添加了成员；成员已经存在时返回 `changed=false`，仍为 200。
+
+### 错误响应
+
+| 状态码 | 响应 | 触发条件 |
+| --- | --- | --- |
+| `401` | `{"detail":"令牌缺失、无效或已过期"}` | 无有效平台令牌，携带 `WWW-Authenticate: Bearer`。 |
+| `403` | `{"detail":"仅注册中心可以执行此操作"}` | 非注册中心调用。 |
+| `422` | FastAPI 校验错误列表或业务 `detail` 字符串 | 目标平台未配置、userid 非法、字段缺失或存在额外字段。 |
+| `503` | `{"detail":"用户存储服务暂不可用，操作结果可能不确定，请稍后核对"}` | Redis 故障或写入确认结果不确定。 |
+
+### 请求示例
+
+```bash
+curl -X POST 'http://127.0.0.1:22000/middleware-service/api/platform/admins/add' \
+  -H 'Authorization: Bearer replace-with-registry-access-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"platform_code":"platform-a","userid":"user-001"}'
+```
+
+### 行为与边界
+
+使用 Redis SADD，只影响目标平台，不覆盖其他管理员；同一用户可以属于多个平台。新增关系不等于用户登录或赋予整数权限等级，不续期用户或平台会话。重复请求幂等；并发操作以实际执行顺序为准。
+
+---
+
+## 删除平台管理员
+
+`POST /middleware-service/api/platform/admins/remove`，从指定平台的管理员集合中移除一个 userid。
+
+### 认证方式
+
+必填 header `Authorization: Bearer <access_token>`，仅注册中心可以调用。
+
+### 请求参数
+
+无 path、query 参数，必填 JSON body，禁止额外字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `platform_code` | string | 是 | 目标平台代码，格式与 YAML 一致且必须已配置；无默认值。 |
+| `userid` | string | 是 | 要移除的管理员唯一标识，非空且不全为空白；无默认值。 |
+
+### 成功响应
+
+状态码 `200`，媒体类型 `application/json`，响应头 `Cache-Control: no-store`：
+
+```json
+{"platform_code":"platform-a","userid":"user-001","changed":true}
+```
+
+`changed=true` 表示本次实际删除了成员；目标平台无管理员或该成员不存在时返回 `changed=false`，仍为 200。
+
+### 错误响应
+
+| 状态码 | 响应 | 触发条件 |
+| --- | --- | --- |
+| `401` | `{"detail":"令牌缺失、无效或已过期"}` | 无有效平台令牌，携带 `WWW-Authenticate: Bearer`。 |
+| `403` | `{"detail":"仅注册中心可以执行此操作"}` | 非注册中心调用。 |
+| `422` | FastAPI 校验错误列表或业务 `detail` 字符串 | 目标平台未配置、userid 非法、字段缺失或存在额外字段。 |
+| `503` | `{"detail":"用户存储服务暂不可用，操作结果可能不确定，请稍后核对"}` | Redis 故障或写入确认结果不确定。 |
+
+### 请求示例
+
+```bash
+curl -X POST 'http://127.0.0.1:22000/middleware-service/api/platform/admins/remove' \
+  -H 'Authorization: Bearer replace-with-registry-access-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"platform_code":"platform-a","userid":"user-001"}'
+```
+
+### 行为与边界
+
+使用 Redis SREM，仅移除目标平台的关系，不删除该用户资料、登录记录或其他平台的管理员关系。删除最后一个成员后 Redis 不保留空集合键，后续内部查询返回空集合。操作不续期用户或平台会话，重复请求幂等。
+
+---
+
+## 查询当前平台管理员
+
+`GET /middleware-service/api/platform/admins/list`，返回当前已认证平台允许的管理员 userid 列表。
+
+### 认证方式
+
+必填 header `Authorization: Bearer <access_token>`。registry 和其他已登录平台均可调用，但都只能查询令牌所属平台。调用方身份由统一认证依赖解析，不由请求参数指定。
+
+### 请求参数
+
+无 path、query 参数，无请求体。额外传入的 platform_code 查询参数不会参与目标平台选择。
+
+### 成功响应
+
+状态码 `200`，媒体类型 `application/json`，响应头 `Cache-Control: no-store`：
+
+```json
+["user-001","user-002"]
+```
+
+返回去重后的 userid 字符串数组，按字符串升序排序；当前平台没有配置管理员时返回 `[]`。这是管理员成员列表，不按用户资料是否已同步或当前是否登录过滤，也不返回其他平台的管理员。
+
+### 错误响应
+
+| 状态码 | 响应 | 条件 |
+| --- | --- | --- |
+| `401` | `{"detail":"令牌缺失、无效或已过期"}` | 无有效平台令牌，携带 `WWW-Authenticate: Bearer`。 |
+| `503` | `{"detail":"用户存储服务暂不可用，操作结果可能不确定，请稍后核对"}` | Redis 读取失败；不得将故障解释为没有管理员。 |
+
+### 请求示例
+
+使用目标平台自身的访问令牌：
+
+```bash
+curl 'http://127.0.0.1:22000/middleware-service/api/platform/admins/list' \
+  -H 'Authorization: Bearer replace-with-platform-access-token'
+```
+
+### 行为与边界
+
+从 Redis 读取当前平台的管理员 Set 并排序返回，不新增或删除管理员，不续期平台会话、用户登录或管理员集合。registry 使用自己的令牌调用时，也只返回 registry 平台自身的管理员。管理员全量更新允许注册中心和 knowledge-accumulation，添加和删除仅允许注册中心。
