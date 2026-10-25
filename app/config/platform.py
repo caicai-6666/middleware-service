@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, model_validator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = Path("data/platform-config/platform.yaml")
@@ -21,7 +21,18 @@ class Platform(BaseModel):
     name: str = Field(min_length=1, description="平台中文展示名称。")
     description: str = Field(min_length=1, description="平台用途说明，不参与权限判定。")
     secret: SecretStr = Field(exclude=True, repr=False, description="YAML 中配置的平台密钥，不对外序列化。")
-    show_in_list: bool = Field(default=True, description="是否在平台列表接口中展示；仅影响列表可见性，不改变平台登录或业务权限。")
+    supports_a2a: bool = Field(default=False, description="是否参与 A2A 协议，作为平台能力标记返回，不参与当前身份或流权限判断。")
+    is_sub_management_platform: bool = Field(default=False, description="是否为子管理平台，作为平台类型标记返回，不参与当前身份或流权限判断。")
+    is_management_entry: bool = Field(default=False, description="是否作为管理平台入口，独立于子管理平台标记，不参与当前身份或流权限判断。")
+    a2aresponsibility: str = Field(default="", description="平台在 A2A 协作中的职责；子管理平台必须填写非空且非纯空白的字符串，其他平台可省略，默认为空字符串。")
+
+    @model_validator(mode="after")
+    def require_sub_platform_responsibility(self):
+        # 按子管理平台身份强制声明职责，不以 supports_a2a 开关绕过该约束。
+        if self.is_sub_management_platform and not self.a2aresponsibility.strip():
+            raise ValueError("子管理平台必须填写非空的 a2aresponsibility。")
+        return self
+
 
 
 class _PlatformFile(BaseModel):

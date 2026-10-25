@@ -91,6 +91,10 @@ class PlatformInfo(BaseModel):
     code: str = Field(description="平台唯一代号。")
     name: str = Field(description="平台中文名称。")
     description: str = Field(description="平台用途描述。")
+    supports_a2a: bool = Field(description="配置中声明的是否参与 A2A 协议。")
+    is_sub_management_platform: bool = Field(description="配置中声明的是否为子管理平台。")
+    is_management_entry: bool = Field(description="配置中声明的是否作为管理平台入口。")
+    a2aresponsibility: str = Field(description="平台在 A2A 协作中的职责；子管理平台为非空说明，其他平台未配置时为空字符串。")
     is_alive: bool = Field(description="是否存在尚未过期的登录会话；不代表业务或 RabbitMQ 健康状态。")
 
 
@@ -104,9 +108,12 @@ async def list_platforms(
     # 显式选择公开字段，避免直接序列化配置或会话而泄露凭据。
     return [
         PlatformInfo(code=platform.code, name=platform.name,
-                     description=platform.description, is_alive=statuses[platform.code])
+                     description=platform.description, is_alive=statuses[platform.code],
+                     supports_a2a=platform.supports_a2a,
+                     is_sub_management_platform=platform.is_sub_management_platform,
+                     is_management_entry=platform.is_management_entry,
+                     a2aresponsibility=platform.a2aresponsibility)
         for platform in request.app.state.platforms.values()
-        if platform.show_in_list
     ]
 
 

@@ -77,6 +77,8 @@ RabbitMQ 的 `RABBITMQ_DEFAULT_USER/PASS` 用于空数据目录的首次初始�
 
 历史删除申请附件保存在 `/workspace/data/deletion-request/file`，Dockerfile 准备独立可写目录，Compose 挂载 `deletion-files` 卷。删除附件内容不进入镜像；新删除申请不再保存附件；registry 确认历史带附件申请后清理对应旧附件；当前没有定时清理或异常遗留文件补偿。
 
+助理任务附件保存在 `/workspace/data/assistant-task/file`，Dockerfile 创建非 root 用户可写目录，Compose 挂载 `assistant-files` 命名卷。任务发布、消息合并与确认使用 Redis 中的文件引用，确认后清理附件，清理失败可重试相同 ack。升级时需重建后端镜像并重新执行 compose up，启用新增挂载；备份时应同时保存 Redis 与该文件卷，详见[助理任务队列](assistant-task.md)。
+
 
 ---
 

@@ -1,6 +1,6 @@
 # Redis 容器部署
 
-Redis 由独立的 `middleware-service-deploy` 项目维护，与 RabbitMQ 和后端通过同一份 Compose 部署。后端已通过异步客户端读写用户资料和登录缓存；平台会话、Stream 预取缓存和发布控制仍按原有进程内实现运行。用户存储结构与原子更新规则见[用户 Redis 缓存](../application/user-cache.md)。
+Redis 由独立的 `middleware-service-deploy` 项目维护，与 RabbitMQ 和后端通过同一份 Compose 部署。后端已通过异步客户端读写用户资料、登录缓存及[助理任务队列](../application/assistant-task.md)；平台会话、RabbitMQ Stream 预取缓存和发布控制仍按原有进程内实现运行。用户存储结构与原子更新规则见[用户 Redis 缓存](../application/user-cache.md)。
 
 ## 文件与配置
 

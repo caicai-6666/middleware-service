@@ -1,6 +1,6 @@
-# 审核附件读取接口
+# 附件读取接口
 
-registry 根据申请消息中的文件引用读取入库附件或历史删除审核附件，返回原始二进制。路由位于 `app/router/resource.py`，文件访问由 `app/service/resource.py` 提供，在 `app/main.py` 装配为 `app.state.resources`。
+registry 根据申请消息中的文件引用读取入库附件或历史删除审核附件；已认证平台也可读取助理任务附件，均返回原始二进制。路由位于 `app/router/resource.py`，文件访问由 `app/service/resource.py` 提供，在 `app/main.py` 装配为 `app.state.resources`。
 
 ## 接口目录
 
@@ -8,12 +8,13 @@ registry 根据申请消息中的文件引用读取入库附件或历史删除�
 | --- | --- | --- |
 | [读取入库审核附件](#读取入库审核附件) | `GET` | `/middleware-service/api/resource/ingestion-requests/{file_id}` |
 | [读取删除审核附件](#读取删除审核附件) | `GET` | `/middleware-service/api/resource/deletion-requests/{file_id}` |
+| [读取助理任务附件](#读取助理任务附件) | `GET` | `/middleware-service/api/resource/assistant-tasks/{file_id}` |
 
 ## 通用约定
 
-仅配置 `RABBITMQ_REGISTRY_PLATFORM_CODE` 指定的注册中心有效会话可读，默认 `registry`；身份通过 `Depends(require_platform)` 从 token 缓存取得，不接受客户端传入平台代号。角色配置复用已有配置，无新增环境变量。
+入库与历史删除审核附件仅配置 `RABBITMQ_REGISTRY_PLATFORM_CODE` 指定的注册中心有效会话可读，默认 `registry`；助理任务附件沿用助理队列的访问范围，所有有效登录平台可读。身份通过 `Depends(require_platform)` 从 token 缓存取得，不接受客户端传入平台代号。角色配置复用已有配置，无新增环境变量。
 
-文件必须在对应审核附件目录中存在，下载不自动 pull、ack、续期或删除文件。文件引用可来自申请 pull 返回的 `message.file`；请在 ack 清理之前下载。
+文件必须在对应业务附件目录中存在，下载不自动 pull、ack、续期或删除文件。审核文件引用来自申请 pull 返回的 `message.file`，助理附件引用来自 `task.files` 或 `task.user_messages[].files`；请在 ack 清理之前下载。
 
 读取时打开文件，以 1 MiB 分块在线程池中读取和传输，不将整个文件加载到内存。正常结束、客户端断开或读取错误都会关闭文件句柄。下载已打开文件后，ack 删除路径不会中断现有下载；删除后新发起的下载返回 404。
 
@@ -140,3 +141,36 @@ curl --fail "http://127.0.0.1:22000/middleware-service/api/resource/deletion-req
 本接口没有修改消费 offset 的副作用，不删除共享流消息或文件。registry 应下载完成并处理申请后再 ack。
 
 若传输开始后磁盘读取失败，连接可能中断，不能再改写为 JSON 错误响应；调用方应检查下载成功状态和文件完整性。首次认证成功后不会在每个分块重新认证。
+
+---
+
+## 读取助理任务附件
+
+`GET /middleware-service/api/resource/assistant-tasks/{file_id}`，读取 `data/assistant-task/file/` 中的助理任务临时文件。
+
+**认证：** Header `Authorization: Bearer <platform_access_token>`。所有有效登录平台可调用，与助理任务队列的访问范围一致；不要求 registry 身份，不执行额外用户级授权。现有两类审核附件权限保持不变。
+
+**请求参数：** 无请求体。
+
+| 位置 | 字段 | 必填 | 类型与约束 |
+| --- | --- | --- | --- |
+| path | `file_id` | 是 | 消息 files 或 user_messages[].files 中的文件标识；1～128 位英文字母、数字、下划线或连字符 |
+| query | `file_extension` | 是 | 文件引用中的后缀；1～16 位英文字母或数字、不带点，读取时转为小写 |
+
+**成功响应：** `200 application/octet-stream`，响应体为原始文件二进制，带 Content-Length、服务端生成下载文件名的 Content-Disposition、Cache-Control: no-store 和 X-Content-Type-Options: nosniff。下载名称为 `<file_id>.<小写后缀>`。
+
+**错误响应：** `401` 平台认证失败；`404` 文件不存在、已清理或不是普通文件；`422` 文件标识或后缀不合法；`503` 文件无法读取。
+
+**请求示例：** 将 URL、平台令牌、文件 ID 和后缀替换为实际值。
+
+```bash
+curl --fail 'http://127.0.0.1:22000/middleware-service/api/resource/assistant-tasks/<file_id>?file_extension=pdf' \
+  -H 'Authorization: Bearer <platform_access_token>' \
+  --output ./attachment.pdf
+```
+
+**行为与边界：** 文件引用由[助理任务发布或领取](assistant-task.md)返回。合并任务按 user_messages[].files 识别每条消息所属文件，根部 files 汇总全部附件。后缀由生产端显式声明，下载不验证实际文件格式。
+
+接口只读，不领取任务、不续租、不确认或删除任务；不跟随文件符号链接，不接受任意磁盘路径，不验证文件是否属于调用平台当前领取任务。请在 ack 前下载或转存所需文件；任务确认后会清理全部对应附件，之后重新下载返回 404。清理失败时文件可能仍存在，应重试相同 ack 完成清理。
+
+下载在线程池分块进行，正常结束、客户端断开或读取失败都会关闭文件。已打开的下载在路径被 ack 删除后仍可继续读取；传输中途错误可能导致连接中断，调用方需确认接收完整。

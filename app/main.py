@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
 
 from app.config.consumer import load_consumer_cache_settings
+from app.config.assistant import load_assistant_task_settings
 from app.config.platform import load_platforms_from_env
 from app.config.stream import load_stream_settings
 from app.service.ingestion_consumer import IngestionConsumerService
@@ -30,6 +31,9 @@ from app.config.redis import load_redis_settings
 from app.infrastructure.redis import create_redis_client
 from app.infrastructure.redis_user import RedisUserStore, UserStorageUnavailableError
 from app.infrastructure.redis_platform_admin import RedisPlatformAdminStore
+from app.infrastructure.redis_assistant import RedisAssistantTaskStore, AssistantStorageUnavailableError
+from app.service.assistant import AssistantTaskService
+from app.service.assistant_file import AssistantFileStore
 from app.service.platform_admin import PlatformAdminService
 from app.service.user import UserService
 from app.service.platform_session import PlatformSessionService
@@ -46,6 +50,7 @@ async def lifespan(application: FastAPI):
     stream_settings = load_stream_settings()
     user_settings = load_user_cache_settings()
     redis_settings = load_redis_settings()
+    assistant_settings = load_assistant_task_settings()
     redis_client = create_redis_client(redis_settings)
     application.state.redis = redis_client
     try:
@@ -125,6 +130,18 @@ async def lifespan(application: FastAPI):
             application.state.platforms, user_settings,
             RedisUserStore(redis_client, redis_settings.key_prefix),
         )
+        application.state.assistant_tasks = AssistantTaskService(
+            RedisAssistantTaskStore(redis_client, redis_settings.key_prefix,
+                                    assistant_settings.max_tasks_per_user,
+                                    assistant_settings.lease_seconds,
+                                    assistant_settings.receipt_ttl_seconds,
+                                    assistant_settings.merge_max_messages,
+                                    assistant_settings.merge_max_bytes,
+                                    assistant_settings.merge_interval_seconds,
+                                    assistant_settings.max_files_per_task),
+            AssistantFileStore(max_files=assistant_settings.max_files_per_task,
+                               max_file_bytes=assistant_settings.max_file_bytes),
+        )
         application.state.registry_platform_code = stream_settings.registry_platform_code
         application.state.platform_admins = PlatformAdminService(
             application.state.platforms,
@@ -154,6 +171,11 @@ def create_app() -> FastAPI:
     async def user_storage_unavailable(request: Request, error: UserStorageUnavailableError):
         return JSONResponse(status_code=503, headers={"Cache-Control": "no-store"},
                             content={"detail": "用户存储服务暂不可用，操作结果可能不确定，请稍后核对"})
+
+    @application.exception_handler(AssistantStorageUnavailableError)
+    async def assistant_storage_unavailable(request: Request, error: AssistantStorageUnavailableError):
+        return JSONResponse(status_code=503, headers={"Cache-Control": "no-store"},
+                            content={"detail": "助理任务存储暂不可用，操作结果可能不确定；发布请用相同 request_id 重试，领取或确认请核对当前任务"})
 
     application.include_router(router, prefix=API_PREFIX)
     return application

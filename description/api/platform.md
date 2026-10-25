@@ -126,11 +126,11 @@ curl -X POST 'http://127.0.0.1:22000/middleware-service/api/platform/heartbeat' 
 
 ## 查询所有平台
 
-`GET /middleware-service/api/platform/list`，返回启动时配置中 show_in_list=true 的平台基本信息及当前会话存活状态。
+`GET /middleware-service/api/platform/list`，返回启动时配置的所有平台基本信息、A2A 参与标记、子管理平台标记、管理平台入口标记及当前会话存活状态。
 
 ### 认证方式
 
-必须携带 `Authorization: Bearer <access_token>`，由统一认证依赖验证。任何活跃平台均可查询允许展示的平台基本信息；registry 也遵循相同过滤规则，不返回密钥、访问令牌或 show_in_list 配置字段。
+必须携带 `Authorization: Bearer <access_token>`，由统一认证依赖验证。任何活跃平台均可查询所有配置平台；不返回密钥或访问令牌。
 
 ### 请求参数
 
@@ -146,7 +146,11 @@ curl -X POST 'http://127.0.0.1:22000/middleware-service/api/platform/heartbeat' 
     "code": "registry",
     "name": "注册中心",
     "description": "审核入库请求",
-    "is_alive": true
+    "is_alive": true,
+    "supports_a2a": false,
+    "is_sub_management_platform": false,
+    "is_management_entry": false,
+    "a2aresponsibility": ""
   }
 ]
 ```
@@ -157,6 +161,10 @@ curl -X POST 'http://127.0.0.1:22000/middleware-service/api/platform/heartbeat' 
 | `name` | string | 平台中文名称。 |
 | `description` | string | 平台用途描述。 |
 | `is_alive` | boolean | 有未过期的登录会话时为 true，否则为 false。 |
+| `supports_a2a` | boolean | 平台是否参与 A2A 协议，来自 YAML 配置，默认 false。 |
+| `is_sub_management_platform` | boolean | 是否为子管理平台，来自 YAML 配置，默认 false。 |
+| `is_management_entry` | boolean | 是否作为管理平台入口，来自 YAML 配置，默认 false。与子管理平台标记独立。 |
+| `a2aresponsibility` | string | 平台后续 A2A 协作中的职责。子管理平台返回非空说明，如“负责解答合同相关问题。”；其他平台未配置时为空字符串。 |
 
 ### 错误响应
 
@@ -171,11 +179,9 @@ curl 'http://127.0.0.1:22000/middleware-service/api/platform/list' \
 
 ### 行为与边界
 
-读取启动时加载的内存配置，不重新读取 YAML。show_in_list 为可选布尔配置，省略时默认 true；false 的平台不出现在响应中，不因其登录或失活改变隐藏规则。全部隐藏时返回 []，额外查询参数不能开启隐藏展示。过滤后仍保留 YAML 顺序。
+读取启动时加载的内存配置，不重新读取 YAML。列表不再隐藏平台，按 YAML 顺序返回所有配置项。supports_a2a、is_sub_management_platform、is_management_entry 与 a2aresponsibility 为静态配置属性，不随登录或失活改变，不代表中间件已经实现 A2A 通信能力，也不改变认证、业务权限或消息角色。
 
-隐藏只影响此列表，不禁用该平台或改变其认证、业务权限及消息角色。修改配置需要重启服务，配置说明见[平台身份配置](../capability/application/platform-config.md)。
-
-对于允许展示的平台，尚未登录、会话过期或正在关闭时均显示失活。状态按同一个时间点计算，过期但尚未被后台清理的记录也返回 false。
+修改配置需要重启服务，配置与旧字段迁移说明见[平台身份配置](../capability/application/platform-config.md)。尚未登录、会话过期或正在关闭的平台均显示失活；状态按同一个时间点计算，过期但尚未被后台清理的记录也返回 false。
 
 查询不续期、不创建或关闭 RabbitMQ 客户端，不探测子平台网络或业务健康情况；`is_alive` 仅表示本中间件中的登录会话状态。
 

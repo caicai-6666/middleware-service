@@ -17,16 +17,18 @@
 | 文档入口 | 内容说明 |
 | --- | --- |
 | [FastAPI 应用基础结构](capability/application/fastapi.md) | 应用入口、路由组织、本地启动和接口文档地址。 |
-| [平台身份配置](capability/application/platform-config.md) | 平台结构体、YAML 列表展示开关、默认路径、只读挂载与启动校验。 |
+| [平台身份配置](capability/application/platform-config.md) | 平台结构体、YAML 的 A2A、子管理平台与管理入口标记、子平台协作职责、默认路径、只读挂载与启动校验。 |
 | [平台会话服务](capability/application/platform-session.md) | 登录缓存、心跳续期、过期清理与本项目环境配置。 |
 | [用户 Redis 缓存](capability/application/user-cache.md) | 用户总表、资料增量更新、登录成功写入和 TTL 滑动续期。 |
 | [平台管理员缓存](capability/application/platform-admin-cache.md) | 平台多管理员 Redis Set、registry 与知识沉淀平台全量、registry 增删、当前平台自查及成员判断。 |
 | [用户接口](api/user.md) | 用户总表与增量资料、用户 token 登录写入及查询续期接口。 |
+| [助理任务接口](api/assistant-task.md) | 每用户优先级任务发布、多附件与消息归属、用户消息合并与分隔线排版、领取确认及状态查询。 |
+| [助理任务队列](capability/application/assistant-task.md) | 单队列设计原则、平台交付结果后确认、Redis 排序与正文、执行租约及幂等。 |
 | [入库请求消费服务](capability/application/ingestion-consumer.md) | 注册中心逐条拉取、确认及 offset 恢复。 |
 | [入库发布去重服务](capability/application/ingestion-deduplication.md) | 平台代码与 source_id 去重、确认进度判断、并发保护及索引恢复。 |
 | [流发布去重服务](capability/application/stream-publish-deduplication.md) | 五个流共用的去重机制，按实际接收方 offset 判断。 |
 | [入库请求消息契约](architecture/data/ingestion-request.md) | 文件转存、消息结构及发布失败边界。 |
-| [审核附件读取接口](api/resource.md) | registry 下载入库或历史删除审核文件，权限及文件生命周期。 |
+| [附件读取接口](api/resource.md) | registry 下载审核附件，已认证平台下载助理任务附件，权限及文件生命周期。 |
 | [API 导航](api/readme.md) | 已注册 HTTP 接口的统一入口。 |
 | [通行证集合契约](architecture/data/passport.md) | 多通行证、单字符串兼容、表单提交及历史消费规范化。 |
 | [审核反馈消息契约](architecture/data/review-result.md) | 反馈字段、文件级别、原请求关联及消费边界。 |

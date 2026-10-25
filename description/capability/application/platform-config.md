@@ -14,7 +14,10 @@ platforms:
     name: 注册中心
     description: 消费入库请求并返回审核结果。
     secret: "change-this-registry-key"
-    show_in_list: true  # false 时不在 platform/list 中展示。
+    supports_a2a: false
+    is_sub_management_platform: false
+    a2aresponsibility: ""
+    is_management_entry: false
 ```
 
 | 字段 | 约束 |
@@ -23,9 +26,24 @@ platforms:
 | `name` | 非空字符串，用于平台中文展示名称。 |
 | `description` | 非空字符串，支持 Markdown；使用 YAML 的 `|` 保留换行，后端原样返回、不渲染，不参与权限判断。 |
 | `secret` | 直接填写非空字符串，不同平台不能共用密钥；不执行环境变量替换。 |
-| `show_in_list` | 可选布尔值，默认 true。false 时从 GET /middleware-service/api/platform/list 中隐藏，对所有调用平台生效。 |
+| `supports_a2a` | 可选严格布尔值，默认 false，声明是否参与 A2A 协议。 |
+| `is_sub_management_platform` | 可选严格布尔值，默认 false，声明是否为子管理平台。 |
+| `is_management_entry` | 可选严格布尔值，默认 false，声明是否作为管理平台入口，与子管理平台标记独立。 |
+| `a2aresponsibility` | A2A 协作职责字符串；is_sub_management_platform=true 时必填、非空且不能全为空白。其他平台可省略，默认空字符串；显式 null、非字符串不合法。 |
 
-code、name、description、secret 四个字段必填，show_in_list 可省略；拒绝未知字段、重复 YAML 字段和空平台列表。show_in_list 必须使用 YAML 布尔值 true/false，不能使用带引号字符串、数字或 null。名称、描述和密钥不能仅包含空白。密钥建议加引号，避免 YAML 将纯数字等内容识别为其他类型。示例密钥仅用于说明，部署时替换为各平台独立密钥。
+code、name、description、secret 四个字段必填，supports_a2a、is_sub_management_platform 和 is_management_entry 可省略；拒绝未知字段、重复 YAML 字段和空平台列表。三个标记必须使用 YAML 布尔值 true/false，不能使用带引号字符串、数字或 null。名称、描述和密钥不能仅包含空白。密钥建议加引号，避免 YAML 将纯数字等内容识别为其他类型。示例密钥仅用于说明，部署时替换为各平台独立密钥。
+
+子管理平台需声明具体职责，supports_a2a 即使为 false 也必须填写；不自动更改任何布尔标记。例如合同平台：
+
+```yaml
+is_sub_management_platform: true
+supports_a2a: true
+a2aresponsibility: |
+  负责解答合同相关问题。
+  包括合同条款与履约问题。
+```
+
+职责在配置加载时校验，原样保留文字与换行，平台列表接口同步返回。该字段是职责元数据，不在本服务中自动触发 A2A 调度。
 
 ---
 
@@ -73,7 +91,9 @@ Compose 的 `.env` 负责 RabbitMQ 凭据、业务流和后端运行参数。dep
 
 每个平台转为不可变 `Platform` 结构体，以代号索引存入只读的 `application.state.platforms`。后续服务可通过 `request.app.state.platforms[platform_code]` 访问。密钥使用 `SecretStr`，从模型序列化和对象表示中排除，需要时显式调用 `secret.get_secret_value()`。
 
-show_in_list 只控制列表展示，隐藏平台仍保留在完整注册表中，可正常登录、心跳、参与权限和流角色判断。列表响应不返回该控制字段；没有任何可展示平台时返回 []。原有配置未提供此字段时保持全部展示。
+平台列表返回所有配置平台，并原样返回 supports_a2a、is_sub_management_platform 与 is_management_entry 三个标记，以及 a2aresponsibility 职责说明；这些属性只描述平台能力、类型和协作职责，不授予额外权限，不改变注册中心角色或消息流规则，也不在中间件内启用 A2A 协议处理。
+
+原 show_in_list 已移除，旧配置必须删除该字段，否则按未知字段拒绝启动。升级时同步修改实际 YAML 与后端；三个标记未配置时均为 false，可根据实际平台能力设置，修改后重启生效。
 
 配置修改后需重启应用，不热加载。本地实际配置已加入 `.gitignore`，Docker 构建也排除实际 `platform.yaml`。部署侧实际配置同样不提交仓库；文件由操作系统权限控制，容器运行用户须具备只读权限。
 

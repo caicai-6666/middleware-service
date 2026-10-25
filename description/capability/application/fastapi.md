@@ -12,6 +12,8 @@
 
 后续代码统一放在 `app/`，路由统一放在 `app/router/`，通过路由装配文件汇总；`main.py` 负责应用装配，不直接定义业务接口。采用显式注册，避免自动扫描带来的隐式依赖。统一前缀 `/middleware-service/api` 定义在 `app/main.py` 的 `API_PREFIX` 中，通过 `include_router` 应用到总路由；业务模块只定义相对路径。自动文档与 OpenAPI 使用 FastAPI 默认地址，不添加业务前缀。
 
+[助理任务接口](../../api/assistant-task.md)在 `app/router/assistant.py` 定义，使用共享 Redis 连接池及独立的任务服务，支持 publish、pull、ack；不新增 RabbitMQ 流。
+
 ---
 
 ## 安装与启动

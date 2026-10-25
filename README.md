@@ -13,6 +13,7 @@
 - **平台管理员缓存**：以平台代码维护多个管理员 userid，使用 Redis Set 去重，提供 knowledge-accumulation 与注册中心可调用的全量更新接口、注册中心专用的增删接口、当前平台管理员列表和内部成员判断方法，见[平台管理员缓存](description/capability/application/platform-admin-cache.md)。
 - **会话保活**：心跳延长会话有效期，定期清理失活平台，并释放其 Stream 客户端资源；同一平台仅允许一个有效登录会话。
 - **消息流转**：支持入库申请、入库审核结果、删除申请、删除审批结果和文件权限调整五个流，每个流提供 `publish`、`pull`、`ack` 接口。
+- **个人助理任务**：每用户一条独立 Redis 任务队列，支持四档优先级及多附件；连续用户消息在发布时合并，仅以分隔线拼接正文并保留各条消息所属附件，领取后冻结。平台交付结果后确认任务，助理之间通过目标任务队列通信，可查询执行中任务及上次成功确认心跳的时间，见[助理任务接口](description/api/assistant-task.md)。
 - **消费确认**：有界批量预取、逐条交付；处理完成后显式确认，由 RabbitMQ 保存消费进度，结果流按目标平台过滤。
 - **发布去重**：依据业务标识和实际接收方的消费进度，拒绝尚未确认消息的重复发布。
 - **附件转存**：入库文件保存在本地临时目录，消息仅保存文件引用；registry 可下载文件，确认入库请求后清理附件。新删除申请无需上传文件。
@@ -35,6 +36,7 @@ middleware-service/
 │   ├── platform-config/         # 本机平台 YAML 配置
 │   ├── ingestion-request/       # file/ 保存入库临时附件
 │   ├── deletion-request/        # file/ 仅兼容历史删除附件
+│   ├── assistant-task/          # file/ 保存助理任务临时附件
 │   ├── rabbitmq-dev/            # 本机自行维护的 RabbitMQ 开发配置
 │   └── redis-dev/               # 本机自行维护的 Redis 开发配置
 ├── description/                 # 接口、设计与运行文档
@@ -111,7 +113,7 @@ platforms:
     secret: "replace-with-platform-a-secret"
 ```
 
-平台表项可增加 `show_in_list: false`，将该平台从 `GET /middleware-service/api/platform/list` 隐藏；默认 true，不影响登录和消息权限。修改 YAML 后重启生效。
+平台表项可配置 `supports_a2a`（是否参与 A2A 协议）、`is_sub_management_platform`（是否为子管理平台）和 `is_management_entry`（是否为管理平台入口），均默认为 false。`GET /middleware-service/api/platform/list` 返回全部配置平台及这三个标记和 `a2aresponsibility` 职责说明，不改变现有登录和消息权限。子管理平台必须填写非空职责，例如 `a2aresponsibility: 负责解答合同相关问题。`，其他平台可省略，默认为空字符串。旧 show_in_list 字段已移除，升级时需从 YAML 删除；修改配置后重启生效。
 
 示例密钥必须替换，各平台代号和密钥均须唯一。`RABBITMQ_REGISTRY_PLATFORM_CODE` 必须与注册中心的 `code` 一致。若配置位于其他位置，在启动进程前设置环境变量 `PLATFORM_CONFIG_PATH`，指定 YAML 路径。
 
@@ -123,6 +125,12 @@ platforms:
 | `PLATFORM_HEARTBEAT_INTERVAL_SECONDS` | `30`，建议心跳间隔，必须小于会话有效期 |
 | `PLATFORM_SESSION_CLEANUP_INTERVAL_SECONDS` | `10`，失活资源清理周期，单位秒 |
 | `USER_CACHE_TTL_SECONDS` | `90`，Redis 用户登录有效期，单位秒 |
+| `ASSISTANT_TASK_MAX_PER_USER` | `1000`，每用户等待及执行中任务总数上限 |
+| `ASSISTANT_TASK_LEASE_SECONDS` | `300`，助理任务执行租约，重复 pull 可续租 |
+| `ASSISTANT_TASK_RECEIPT_TTL_SECONDS` | `86400`，确认回执与完成后发布去重记录保留秒数 |
+| `ASSISTANT_USER_MESSAGE_MERGE_MAX_MESSAGES` / `ASSISTANT_USER_MESSAGE_MERGE_MAX_BYTES` | `20` / `65536`，用户任务的合并条数及原文 UTF-8 总字节阈值 |
+| `ASSISTANT_USER_MESSAGE_MERGE_INTERVAL_SECONDS` | `30`，相邻用户消息的最大合并间隔秒数，合并后创建时间取最晚消息时间 |
+| `ASSISTANT_TASK_MAX_FILES` / `ASSISTANT_TASK_MAX_FILE_BYTES` | `10` / `20971520`，每任务附件数及单文件大小上限，支持 multipart 上传并通过 resource 下载 |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | Redis 连接地址和密码，启动时必须可连接 |
 | `REDIS_DB` / `REDIS_KEY_PREFIX` / `REDIS_MAX_CONNECTIONS` | 默认 `0` / `middleware-service` / `20` |
 | `RABBITMQ_HOST` / `RABBITMQ_PORT` | 本机默认 `localhost:5552` |

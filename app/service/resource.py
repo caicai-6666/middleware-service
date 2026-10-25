@@ -1,4 +1,4 @@
-"""读取两类审核附件，限制角色、目录和文件路径。"""
+"""读取审核与助理任务附件，分别限制角色、目录和文件路径。"""
 
 import errno
 import os
@@ -20,7 +20,7 @@ class ResourceForbiddenError(Exception):
 
 
 class ResourceNotFoundError(Exception):
-    """审核附件不存在或不是允许读取的普通文件。"""
+    """附件不存在或不是允许读取的普通文件。"""
 
 
 class ResourceReadError(Exception):
@@ -36,17 +36,20 @@ class OpenedResource:
 
 class ResourceService:
     def __init__(self, registry_code: str, ingestion_directory: Path | None = None,
-                 deletion_directory: Path | None = None):
+                 deletion_directory: Path | None = None, assistant_directory: Path | None = None):
         self._registry_code = registry_code
         self._directories = {
             "ingestion": ingestion_directory if ingestion_directory is not None
                          else PROJECT_ROOT / "data/ingestion-request/file",
             "deletion": deletion_directory if deletion_directory is not None
                         else PROJECT_ROOT / "data/deletion-request/file",
+            "assistant": assistant_directory if assistant_directory is not None
+                         else PROJECT_ROOT / "data/assistant-task/file",
         }
 
     async def open(self, code: str, kind: str, file_id: str, file_extension: str) -> OpenedResource:
-        if code != self._registry_code:
+        # 助理附件沿用任务接口的已认证平台访问范围；审核附件继续仅允许 registry。
+        if kind != "assistant" and code != self._registry_code:
             raise ResourceForbiddenError()
         if (re.fullmatch(FILE_ID_PATTERN, file_id) is None
                 or re.fullmatch(FILE_EXTENSION_PATTERN, file_extension) is None):

@@ -18,6 +18,10 @@
 | [更新单个用户信息](user.md#更新单个用户信息) | `POST` | `/middleware-service/api/user/update` |
 | [写入用户登录缓存](user.md#写入用户登录缓存) | `PUT` | `/middleware-service/api/user/login-cache` |
 | [查询并续期用户登录缓存](user.md#查询并续期用户登录缓存) | `POST` | `/middleware-service/api/user/login-cache` |
+| [发布助理任务](assistant-task.md#发布助理任务) | `POST` | `/middleware-service/api/assistant/tasks/publish` |
+| [领取助理任务](assistant-task.md#领取助理任务) | `POST` | `/middleware-service/api/assistant/tasks/pull` |
+| [确认助理任务](assistant-task.md#确认助理任务) | `POST` | `/middleware-service/api/assistant/tasks/ack` |
+| [查询助理任务状态](assistant-task.md#查询助理任务状态) | `GET` | `/middleware-service/api/assistant/tasks/status` |
 | [提交入库请求](ingestion.md#提交入库请求) | `POST` | `/middleware-service/api/ingestion-requests/publish` |
 | [拉取一条入库请求](ingestion.md#拉取一条入库请求) | `POST` | `/middleware-service/api/ingestion-requests/pull` |
 | [确认处理完成](ingestion.md#确认处理完成) | `POST` | `/middleware-service/api/ingestion-requests/ack` |
@@ -35,6 +39,7 @@
 | [确认文件权限调整](file-permission.md#确认文件权限调整) | `POST` | `/middleware-service/api/file-permission-adjustments/ack` |
 | [读取入库审核附件](resource.md#读取入库审核附件) | `GET` | `/middleware-service/api/resource/ingestion-requests/{file_id}` |
 | [读取删除审核附件](resource.md#读取删除审核附件) | `GET` | `/middleware-service/api/resource/deletion-requests/{file_id}` |
+| [读取助理任务附件](resource.md#读取助理任务附件) | `GET` | `/middleware-service/api/resource/assistant-tasks/{file_id}` |
 
 
 删除申请及删除审批结果 publish/pull/ack 均已实现。结果按认证子平台过滤，确认后推进该平台在对应结果流中的独立进度。
