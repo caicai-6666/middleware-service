@@ -12,7 +12,9 @@
 
 后续代码统一放在 `app/`，路由统一放在 `app/router/`，通过路由装配文件汇总；`main.py` 负责应用装配，不直接定义业务接口。采用显式注册，避免自动扫描带来的隐式依赖。统一前缀 `/middleware-service/api` 定义在 `app/main.py` 的 `API_PREFIX` 中，通过 `include_router` 应用到总路由；业务模块只定义相对路径。自动文档与 OpenAPI 使用 FastAPI 默认地址，不添加业务前缀。
 
-[助理任务接口](../../api/assistant-task.md)在 `app/router/assistant.py` 定义，使用共享 Redis 连接池及独立的任务服务，支持 publish、pull、ack；不新增 RabbitMQ 流。
+[助理任务接口](../../api/assistant-task.md)在 `app/router/assistant.py` 定义，使用共享 Redis 连接池及独立的任务服务，支持 publish、pull、ack 和 status；不新增 RabbitMQ 流。
+
+[平台 A2A 接口](../../api/platform-a2a.md)在 `app/router/platform_a2a.py` 定义，通过共同前缀 `/platform-a2a` 注册七个接口。请求 publish/pull 共用原队列，replies/publish 自动分流并完成原请求；replies/pull、replies/ack 用于首次广播或首次单聊的聚合与关闭；direct-replies/pull、direct-replies/ack 用于顶层按独立窗口持续领取单聊反馈和逐条确认。lifespan 复用连接池装配 `application.state.platform_a2a`；配置与实现见[平台 A2A 请求队列](platform-a2a.md)。
 
 ---
 
@@ -28,15 +30,15 @@ python -m pip install -r requirement.txt
 python -m app.main
 ```
 
-模块启动默认监听 `127.0.0.1:22000`，自动启用开发热重载。`app/main.py` 向 Uvicorn 传入应用导入字符串 `app.main:app`，以单 worker 运行，并仅监听 `app/` 下的 Python 代码变化。临时业务文件不参与代码重载。
+模块启动默认监听 `127.0.0.1:22000`，以单 worker 运行，关闭热重载，修改代码后需手动重启。`app/main.py` 向 Uvicorn 传入应用导入字符串 `app.main:app`。
 
-也可显式通过 Uvicorn 启动：
+需要热重载时，可显式通过 Uvicorn 启动，并仅监听 `app/` 下的 Python 代码变化：
 
 ```bash
 python -m uvicorn app.main:app --host 127.0.0.1 --port 22000 --reload --reload-dir app
 ```
 
-使用模块方式启动，不使用 `python app/main.py`。服务启动需要有效的平台配置与 RabbitMQ 连接配置，RabbitMQ 容器须已准备五个业务流，后端仅检查存在性。默认读取项目根目录的 `data/platform-config/platform.yaml`，密钥直接填写在 YAML 中；可通过 `PLATFORM_CONFIG_PATH` 覆盖路径。
+使用模块方式启动，不使用 `python app/main.py`。服务启动需要有效的平台配置、RabbitMQ 和 Redis 连接配置，Redis 必须通过启动 PING，RabbitMQ 容器须已准备五个业务流，后端仅检查存在性。默认读取项目根目录的 `data/platform-config/platform.yaml`，密钥直接填写在 YAML 中；可通过 `PLATFORM_CONFIG_PATH` 覆盖路径。
 
 热重载会重启服务进程，重新执行 lifespan，内存登录会话和待确认缓存会重建；子平台需要重新登录，未确认消息从 RabbitMQ 已保存进度恢复。平台 YAML 与 `.env` 不在 Python 代码监听范围内，修改后需要手动重启。容器仍使用 Dockerfile 的生产启动命令，不启用热重载。
 

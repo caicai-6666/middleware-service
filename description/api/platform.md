@@ -1,6 +1,6 @@
 # 平台 API
 
-平台使用启动时加载的 YAML 白名单密钥登录，获取内存会话令牌；knowledge-accumulation 与注册中心可全量更新各平台的多管理员集合，注册中心可增删单个管理员。
+平台使用启动时加载的 YAML 白名单密钥登录，获取内存会话令牌；注册中心可只读验证其他平台令牌并取得可信代码。knowledge-accumulation 与注册中心可全量更新各平台的多管理员集合，注册中心可增删单个管理员。
 
 ## 接口目录
 
@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | [平台登录](#平台登录) | `POST` | `/middleware-service/api/platform/login` |
 | [平台心跳](#平台心跳) | `POST` | `/middleware-service/api/platform/heartbeat` |
+| [只读校验平台令牌](#只读校验平台令牌) | `POST` | `/middleware-service/api/platform/token/verify` |
 | [查询所有平台](#查询所有平台) | `GET` | `/middleware-service/api/platform/list` |
 | [全量更新平台管理员](#全量更新平台管理员) | `POST` | `/middleware-service/api/platform/admins/full-table` |
 | [新增平台管理员](#新增平台管理员) | `POST` | `/middleware-service/api/platform/admins/add` |
@@ -121,6 +122,73 @@ curl -X POST 'http://127.0.0.1:22000/middleware-service/api/platform/heartbeat' 
 成功后将平台会话截止时刻设为当前单调时间加有效期，不在旧时间上累加，不轮换令牌。到期立即拒绝，即使后台尚未清理。无效请求不延长平台有效期，收到 401 应重新登录。
 
 平台心跳与用户登录生命周期独立。Redis 运行期间发生故障时，此接口仍只访问平台内存会话；这不改变应用启动时对 Redis 的连接校验。
+
+---
+
+## 只读校验平台令牌
+
+`POST /middleware-service/api/platform/token/verify`，由注册中心验证跨服务请求携带的平台令牌，获得当前可信平台代码。与平台心跳不同，本接口只读，不续期被验证令牌，也不清理其会话和 Stream 资源。
+
+### 认证方式
+
+header 必填 `Authorization: Bearer <registry_platform_access_token>`，表示注册中心自己的中间件平台会话；只有 `RABBITMQ_REGISTRY_PLATFORM_CODE` 配置的平台（默认 registry）可以调用，其他有效平台返回 403。
+
+待验证的是 JSON body 中另一个 access_token，例如知识后端调用注册中心时携带的知识平台令牌。两种令牌不能混用：注册中心用自己的令牌认证本次校验请求，不使用待验证令牌作为校验接口的调用凭据。不需要平台密钥，也不验证用户登录状态。
+
+### 请求参数
+
+媒体类型 `application/json`；无 path、query 参数，body 必填且只能包含：
+
+| 字段 | 类型 | 必填 | 约束 |
+| --- | --- | --- | --- |
+| `access_token` | string | 是 | 待验证的平台访问令牌，非空且不能全为空白；与 header 中注册中心自己的令牌不同，无默认值。 |
+
+不接受 platform_code、用户标识、用户权限、平台密钥或其他额外字段。凭证模型使用 SecretStr，正常响应和参数错误响应都不回显输入令牌或密钥。
+
+### 成功响应
+
+状态码 `200`，媒体类型 `application/json`，响应头 `Cache-Control: no-store`。固定只有 valid、code 两个字段：
+
+```json
+{"valid":true,"code":"knowledge-accumulation"}
+```
+
+待验证令牌未知、已过期、已被替换、映射不一致或服务正在清理关闭时，统一返回：
+
+```json
+{"valid":false,"code":null}
+```
+
+valid 表示本次检查时的有效性，code 只在有效时为令牌所属的平台代码。目标令牌无效不是本次调用者认证失败，因此仍返回 200，不返回 401。响应不包含 token、secret、用户资料、权限映射或有效期，不构成对后续操作的持续授权。
+
+### 错误响应
+
+| 状态码 | 响应 | 条件 |
+| --- | --- | --- |
+| `401` | `{"detail":"令牌缺失、无效或已过期"}` | header 中注册中心自身令牌缺失、无效或过期，携带 WWW-Authenticate: Bearer。 |
+| `403` | `{"detail":"仅注册中心可以执行此操作"}` | header 认证平台不是配置的注册中心。 |
+| `422` | `{"detail":"请求体仅接受非空 access_token 字符串"}` | JSON 非法、令牌字段缺失、类型错误、空白或存在额外字段，不回显原始请求内容。 |
+
+注册中心需区分自身认证失败和被验证目标无效；中间件连接失败、请求超时及其他非预期响应都应拒绝放行，不应回退为调用 heartbeat 或信任客户端声明的平台代码。
+
+### 请求示例
+
+替换两个令牌为各自角色的实际值，不传平台密钥：
+
+```bash
+curl -X POST 'http://127.0.0.1:22000/middleware-service/api/platform/token/verify' \
+  -H 'Authorization: Bearer replace-with-registry-platform-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"access_token":"replace-with-calling-platform-token"}'
+```
+
+### 行为与边界
+
+使用单进程权威会话索引的同步只读快照，核对双向映射和单调时钟截止时间。检查期间无 await，不获取被验证平台资源锁，不调用 heartbeat、过期清理、释放监听器或 Redis，不更改目标与注册中心自身的有效期。目标即使已过期但还未被后台清理，也立即返回无效；目标资源仍由既有后台清理或后续正常认证、重新登录负责回收。
+
+该接口只证明平台身份，不授权任意 userid 或文件。注册中心仍须核对可信平台代码，例如只允许 knowledge-accumulation 代表其可信上下文绑定的用户访问，再实时检查该用户的文件权限；不能仅凭客户端传入的 userid 放行。每次敏感访问重新校验，不长期缓存有效结果，调用方负责用户来源绑定。
+
+当前平台会话仍为单进程内存，重启后旧令牌失效，多实例必须先解决共享会话或路由到权威实例；本接口不新增共享存储，不承诺跨进程可见。实现与测试见[平台会话服务](../capability/application/platform-session.md#平台令牌只读校验)。
 
 ---
 

@@ -3,7 +3,7 @@
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from app.router.dependencies import AuthenticatedPlatform, require_platform, require_registry, require_platform_admin_table_writer
 from app.service.platform_session import PlatformResourcesUnavailableError, InvalidAccessTokenError, InvalidSecretError, PlatformAlreadyOnlineError
@@ -30,6 +30,45 @@ class LoginResponse(BaseModel):
     code: str = Field(description="认证成功的平台代号。")
     heartbeat_interval_seconds: int = Field(description="建议发送心跳的间隔秒数，小于会话有效期。")
     expires_in_seconds: int = Field(description="自登录成功起的会话有效秒数。")
+
+
+class VerifyPlatformTokenRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid', hide_input_in_errors=True)
+
+    access_token: SecretStr = Field(min_length=1, repr=False, description="待验证的调用平台访问令牌，不是用户 token，也不是请求头中注册中心自身的 Bearer；不接受空字符串或纯空白。")
+
+    @field_validator('access_token')
+    @classmethod
+    def reject_blank_token(cls, token: SecretStr) -> SecretStr:
+        if not token.get_secret_value().strip():
+            raise ValueError('待验证平台令牌不能为空白')
+        return token
+
+
+class VerifyPlatformTokenResponse(BaseModel):
+    valid: bool = Field(description="待验证平台令牌在本次只读检查时是否仍有效；不续期、不保证后续仍有效。")
+    code: str | None = Field(description="有效令牌所属的平台代码；未知、过期、已替换或停机中的令牌返回 null，不返回任何令牌或密钥。")
+
+
+@router.post('/token/verify', response_model=VerifyPlatformTokenResponse, summary='只读校验平台令牌',
+             description='仅注册中心用自身平台 Bearer 验证请求体内的另一个平台令牌并取得可信代码，不续期或清理被验证会话，不查询用户权限。',
+             openapi_extra={'requestBody': {'required': True, 'content': {
+                 'application/json': {'schema': VerifyPlatformTokenRequest.model_json_schema()}}}},
+             responses={401: {'description': '注册中心自身的 Bearer 缺失、无效或过期'},
+                        403: {'description': '认证调用方不是配置的注册中心'},
+                        422: {'description': '待验证令牌字段缺失、不合法或携带额外字段'}})
+async def verify_platform_token(
+    request: Request, response: Response,
+    platform: Annotated[AuthenticatedPlatform, Depends(require_registry)],
+) -> VerifyPlatformTokenResponse:
+    try:
+        body = VerifyPlatformTokenRequest.model_validate(await request.json())
+    except (ValueError, TypeError):
+        # 凭证校验入口统一返回不含原始输入的错误，避免 422 自动回显令牌或额外的密钥字段。
+        raise HTTPException(422, '请求体仅接受非空 access_token 字符串') from None
+    code = request.app.state.platform_sessions.inspect_platform(body.access_token.get_secret_value())
+    response.headers['Cache-Control'] = 'no-store'
+    return VerifyPlatformTokenResponse(valid=code is not None, code=code)
 
 
 @router.post("/login", response_model=LoginResponse, summary="平台登录",

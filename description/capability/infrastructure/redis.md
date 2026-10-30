@@ -1,6 +1,6 @@
 # Redis 容器部署
 
-Redis 由独立的 `middleware-service-deploy` 项目维护，与 RabbitMQ 和后端通过同一份 Compose 部署。后端已通过异步客户端读写用户资料、登录缓存及[助理任务队列](../application/assistant-task.md)；平台会话、RabbitMQ Stream 预取缓存和发布控制仍按原有进程内实现运行。用户存储结构与原子更新规则见[用户 Redis 缓存](../application/user-cache.md)。
+Redis 由独立的 `middleware-service-deploy` 项目维护，与 RabbitMQ 和后端通过同一份 Compose 部署。后端已通过异步客户端读写用户资料、登录缓存、[助理任务队列](../application/assistant-task.md)及独立的[平台 A2A 请求队列](../application/platform-a2a.md)；平台会话、RabbitMQ Stream 预取缓存和发布控制仍按原有进程内实现运行。用户存储结构与原子更新规则见[用户 Redis 缓存](../application/user-cache.md)。
 
 ## 文件与配置
 
@@ -58,6 +58,16 @@ Redis 密码由每次启动时的环境变量配置；修改密码后需重建 R
 
 ---
 
+## 并发与连接池
+
+客户端使用原生非等待连接池，`REDIS_MAX_CONNECTIONS` 默认 `20`。它限制同时占用的 Redis 连接数，不等同于 A2A 平台执行窗口、HTTP 并发或队列容量；接口与后台轮询共用此池。达到上限会立即获取失败，业务层按存储不可用返回 `503`，不会等待其他命令释放连接。连接层禁用自动重试，写入不确定性仍由业务幂等协议处理。
+
+2026-10-26 的真实 A2A 突发实验确认：32 并发发布时池 20 出现 `MaxConnectionsError`；同负载实验设为 64 后未再出现连接获取错误，容量满仍返回 `429`。具体条件与完整失败计数见[平台 A2A 联调与负载验证](../application/platform-a2a-validation.md#redis-连接池与突发并发)。
+
+部署应根据实际接口、消费者和轮询并发配置连接池及入口限流，结合 Redis 连接预算验证，不能把 64 当作通用容量保证。客户端收到 503 时应保留原幂等标识与载荷，按各业务契约退避重试；空队列轮询也需要退避，以降低连接竞争和回执存储开销。配置在进程启动时加载，本轮实验没有修改实际 `.env` 或生产默认值。
+
+---
+
 ## 验证记录
 
 2026-10-19 使用独立测试容器与命名卷完成验证：Compose 配置解析、Redis 镜像构建、包含空格及特殊字符的密码认证、匿名与错误密码拒绝、认证健康检查、非 root 运行、无宿主机端口、AOF 配置、正常停止并重建后的数据恢复，以及缺少密码时拒绝启动，均通过。
@@ -69,35 +79,17 @@ Redis 密码由每次启动时的环境变量配置；修改密码后需重建 R
 
 ## 本机开发
 
-本机开发连接使用本项目 `.env`，与生产 deploy 的实际密码独立。当前已准备 `data/redis-dev/docker-compose.yml`，项目名为 `middleware-service-redis-dev`，只向本机 `127.0.0.1` 发布 Redis 端口，默认 6379；卷名为 `middleware-service-redis-dev_redis-data`。
+本机后端读取本项目 `.env`，容器读取同级 `middleware-service-deploy/.env`。本机 IDE 开发采用 deploy 的独立 `docker-compose.dev.yml`，同时管理 Redis 与 RabbitMQ；本项目 Redis 密码须与该开发容器一致，实际生产环境另行管理凭据。
 
 从应用项目根目录执行：
 
 ```bash
-docker compose --env-file .env -f data/redis-dev/docker-compose.yml up -d --build --wait redis
+docker compose --env-file ../middleware-service-deploy/.env \
+  -f ../middleware-service-deploy/docker-compose.dev.yml up -d --build --wait redis
 ```
 
-该 Compose 文件按 data 白名单规则忽略，只有 `data/redis-dev/.gitkeep` 进入 Git。新工作区需自行准备本机 Compose 或连接现成 Redis；下面是当前开发配置的最小示例，构建目录假定 deploy 与应用仓库同级：
+开发项目名为 `phenosolar-middleware-dev`，只向 `127.0.0.1:6379` 发布 Redis 端口，数据卷为 `phenosolar-middleware-dev_redis-data`。在本项目 `.env` 中设置 REDIS_HOST=127.0.0.1、REDIS_PORT=6379、REDIS_DB=0 及对应密码；开发 Compose 的端口固定为 6379，需要调整时同时修改 Compose 和后端连接配置。
 
-```yaml
-name: middleware-service-redis-dev
-services:
-  redis:
-    build:
-      context: ../../../middleware-service-deploy/redis
-    image: middleware-redis:7.4.8
-    restart: unless-stopped
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?请配置本项目 .env}
-    ports:
-      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
-    volumes:
-      - redis-data:/data
-    stop_grace_period: 30s
-volumes:
-  redis-data:
-```
-
-在 `.env` 中设置 REDIS_HOST=localhost、REDIS_PORT、REDIS_DB=0 和独立强密码；修改端口时同步后端连接配置。该开发目录被 Docker 构建上下文排除，生产部署仍不发布 Redis 端口。
+原 `data/redis-dev/` 仅保留历史占位，不再作为当前入口；旧 `middleware-service-redis-dev_redis-data` 卷不会自动迁移。新工作区需取得 deploy 仓库或连接现成 Redis。开发镜像复用 deploy/redis 构建目录、密码认证、AOF 和健康检查；生产 Compose 仍使用独立项目和卷，不发布 Redis 端口。完整本机基础设施管理由工作区同级 dev-infra 的 README 说明，该工具不随本后端仓库分发。
 
 2026-10-19 用户存储迁移后，真实 Redis 测试使用随机键前缀隔离，覆盖自动过期、登录映射原子续期、退出与查询并发、总表版本冲突、并发增量资料更新、故障 503、跨服务实例共享和后端停机保留数据。测试仅清理自己的前缀；本机 Redis 开发容器保留运行，未操作现有 RabbitMQ 业务消息。

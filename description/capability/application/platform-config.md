@@ -30,6 +30,7 @@ platforms:
 | `is_sub_management_platform` | 可选严格布尔值，默认 false，声明是否为子管理平台。 |
 | `is_management_entry` | 可选严格布尔值，默认 false，声明是否作为管理平台入口，与子管理平台标记独立。 |
 | `a2aresponsibility` | A2A 协作职责字符串；is_sub_management_platform=true 时必填、非空且不能全为空白。其他平台可省略，默认空字符串；显式 null、非字符串不合法。 |
+| `a2a_max_inflight` | 可选严格整数 1～100，本平台 A2A 消费窗口：子平台用于请求，顶层用于单聊反馈；省略或 null 使用默认窗口 3（可通过环境覆盖）。不能填写布尔值、字符串或浮点数。 |
 
 code、name、description、secret 四个字段必填，supports_a2a、is_sub_management_platform 和 is_management_entry 可省略；拒绝未知字段、重复 YAML 字段和空平台列表。三个标记必须使用 YAML 布尔值 true/false，不能使用带引号字符串、数字或 null。名称、描述和密钥不能仅包含空白。密钥建议加引号，避免 YAML 将纯数字等内容识别为其他类型。示例密钥仅用于说明，部署时替换为各平台独立密钥。
 
@@ -38,12 +39,15 @@ code、name、description、secret 四个字段必填，supports_a2a、is_sub_ma
 ```yaml
 is_sub_management_platform: true
 supports_a2a: true
+a2a_max_inflight: 5
 a2aresponsibility: |
   负责解答合同相关问题。
   包括合同条款与履约问题。
 ```
 
 职责在配置加载时校验，原样保留文字与换行，平台列表接口同步返回。该字段是职责元数据，不在本服务中自动触发 A2A 调度。
+
+平台 A2A 领取时按 a2a_max_inflight 自动补齐剩余消费名额，客户端不传 limit；该窗口由同一平台所有用户和实例共享。子管理平台配置限制其请求执行数，knowledge-accumulation 配置限制其已领取但未确认的单聊反馈数，两类计数独立。广播聚合不占顶层单聊窗口。修改 YAML 后重启生效，未填写时继续使用默认窗口。a2a_max_inflight 不增加到平台列表公开字段，实际值在领取响应 capacity 中返回。
 
 ---
 
@@ -81,7 +85,7 @@ PLATFORM_CONFIG_PATH=/data/platform-config/platform.yaml → 后端加载文件
 docker compose up -d --build --wait
 ```
 
-Compose 的 `.env` 负责 RabbitMQ 凭据、业务流和后端运行参数。deploy 仅保留生产布局，应用仓库位于 `./middleware-service`；本机开发由应用项目 `data/rabbitmq-dev/` 的独立配置管理。
+Compose 的 `.env` 负责 RabbitMQ 凭据、业务流和后端运行参数。生产 Compose 中应用仓库位于 `./middleware-service`；本机开发使用 deploy 的独立 `docker-compose.dev.yml`，只运行 RabbitMQ 和 Redis，后端在 IDE 中启动，见[RabbitMQ 本地开发环境](../infrastructure/rabbitmq-stream.md)。
 
 ---
 
@@ -91,7 +95,7 @@ Compose 的 `.env` 负责 RabbitMQ 凭据、业务流和后端运行参数。dep
 
 每个平台转为不可变 `Platform` 结构体，以代号索引存入只读的 `application.state.platforms`。后续服务可通过 `request.app.state.platforms[platform_code]` 访问。密钥使用 `SecretStr`，从模型序列化和对象表示中排除，需要时显式调用 `secret.get_secret_value()`。
 
-平台列表返回所有配置平台，并原样返回 supports_a2a、is_sub_management_platform 与 is_management_entry 三个标记，以及 a2aresponsibility 职责说明；这些属性只描述平台能力、类型和协作职责，不授予额外权限，不改变注册中心角色或消息流规则，也不在中间件内启用 A2A 协议处理。
+平台列表返回所有配置平台，并原样返回 supports_a2a、is_sub_management_platform 与 is_management_entry 三个标记，以及 a2aresponsibility 职责说明。这些属性不改变平台登录、注册中心角色或已有消息流规则。[平台 A2A 接口](../../api/platform-a2a.md)使用 supports_a2a 与 is_sub_management_platform 校验目标和领取方角色，要求两者均为 true，且不允许顶层作为子平台目标。请求发布和领取已实现，配置标记本身不自动产生任务。is_management_entry 和职责说明不参与该角色校验。
 
 原 show_in_list 已移除，旧配置必须删除该字段，否则按未知字段拒绝启动。升级时同步修改实际 YAML 与后端；三个标记未配置时均为 false，可根据实际平台能力设置，修改后重启生效。
 
@@ -103,7 +107,7 @@ Compose 的 `.env` 负责 RabbitMQ 凭据、业务流和后端运行参数。dep
 
 ## 验证
 
-[配置测试](../../../tests/test_platform_config.py)覆盖默认与覆盖路径、工作目录独立性、直接密钥、字段与重复项校验、敏感信息保护及启动生命周期。
+历史本地配置测试覆盖默认与覆盖路径、工作目录独立性、直接密钥、字段与重复项校验、敏感信息保护及启动生命周期；tests 目录按现有仓库规则不随代码分发。当前 a2a_max_inflight 的类型、范围、默认值和平台覆盖已在本机 `tests/test_platform_a2a.py` 中验证，见[平台 A2A 验证状态](platform-a2a.md#验证状态)。
 
 ```bash
 conda activate middleware-service

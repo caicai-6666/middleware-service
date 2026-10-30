@@ -21,10 +21,11 @@ class Platform(BaseModel):
     name: str = Field(min_length=1, description="平台中文展示名称。")
     description: str = Field(min_length=1, description="平台用途说明，不参与权限判定。")
     secret: SecretStr = Field(exclude=True, repr=False, description="YAML 中配置的平台密钥，不对外序列化。")
-    supports_a2a: bool = Field(default=False, description="是否参与 A2A 协议，作为平台能力标记返回，不参与当前身份或流权限判断。")
-    is_sub_management_platform: bool = Field(default=False, description="是否为子管理平台，作为平台类型标记返回，不参与当前身份或流权限判断。")
+    supports_a2a: bool = Field(default=False, description="是否参与 A2A 协议；平台 A2A 子平台接口要求此标记为 true，不改变平台登录及其他消息流权限。")
+    is_sub_management_platform: bool = Field(default=False, description="是否为子管理平台；平台 A2A 子平台接口要求此标记为 true，不改变平台登录及其他消息流权限。")
     is_management_entry: bool = Field(default=False, description="是否作为管理平台入口，独立于子管理平台标记，不参与当前身份或流权限判断。")
     a2aresponsibility: str = Field(default="", description="平台在 A2A 协作中的职责；子管理平台必须填写非空且非纯空白的字符串，其他平台可省略，默认为空字符串。")
+    a2a_max_inflight: int | None = Field(default=None, strict=True, ge=1, le=100, description="本平台 A2A 消费窗口，子管理平台用于请求，顶层用于单聊反馈；1～100 的严格整数，省略或 null 时使用服务默认值，领取自动补齐剩余名额。")
 
     @model_validator(mode="after")
     def require_sub_platform_responsibility(self):

@@ -6,7 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.router.dependencies import AuthenticatedPlatform, require_platform, require_registry, require_knowledge_accumulation, require_user_table_writer
-from app.service.user import UserInfo, UserInfoPatch, UserLoginRequest, UserToken, UserNotFoundError, UserTokenConflictError
+from app.service.user import (
+    UserInfo, UserInfoPatch, UserLoginRequest, UserToken, UserKey, UserFilePermission,
+    UserNotFoundError, UserTokenConflictError, Departments,
+)
 
 router = APIRouter(prefix="/user", tags=["用户"])
 
@@ -29,6 +32,22 @@ class UserLoginResponse(BaseModel):
 
 class UserLoginQueryResponse(UserLoginResponse):
     username: str | None = Field(description="有效登录对应用户的当前用户名；令牌无效或过期时为 null。")
+    departments: Departments | None = Field(description="有效登录对应用户当前所属的部门名称列表，无部门或旧资料为 []；用户令牌无效或过期时为 null，不表示文件权限或管理员身份。")
+
+
+@router.post('/file-permission', response_model=UserFilePermission, summary='查询用户在本平台的文件权限',
+             description='平台 Bearer 认证后按 userid 查询 Redis 当前权威权限，仅返回调用平台等级；不要求用户 token 或管理员身份，不创建或续期用户登录。',
+             responses={401: {'description': '平台令牌缺失、无效或已过期'},
+                        422: {'description': '用户标识不合法或携带额外字段'},
+                        503: {'description': '用户存储不可用或权限数据异常，调用方必须拒绝放行'}})
+async def query_user_file_permission(
+    body: UserKey, request: Request, response: Response,
+    platform: Annotated[AuthenticatedPlatform, Depends(require_platform)],
+) -> UserFilePermission:
+    # 平台范围只从认证身份获取，不接收平台、等级、登录状态或管理员绕过参数。
+    result = await request.app.state.users.get_file_permission(body.userid, platform.code)
+    response.headers['Cache-Control'] = 'no-store'
+    return result
 
 
 @router.put("/login-cache", response_model=UserLoginResponse, summary="写入用户登录缓存",
@@ -77,7 +96,8 @@ async def update_user_info(
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from None
     response.headers["Cache-Control"] = "no-store"
-    return UserInfo(userid=user.userid, username=user.username, permissions=dict(user.permissions))
+    return UserInfo(userid=user.userid, username=user.username, permissions=dict(user.permissions),
+                    departments=list(user.departments))
 
 
 @router.post("/login-cache", response_model=UserLoginQueryResponse, summary="查询并续期用户登录缓存",
@@ -89,4 +109,5 @@ async def query_user_login(
     status = await request.app.state.users.touch_login(body.access_token)
     response.headers["Cache-Control"] = "no-store"
     return UserLoginQueryResponse(userid=status.userid, username=status.username,
+                                  departments=list(status.departments) if status.departments is not None else None,
                                   is_logged_in=status.is_logged_in, ttl=status.ttl)

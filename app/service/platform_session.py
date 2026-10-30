@@ -1,4 +1,4 @@
-"""单进程平台会话缓存，所有状态操作通过同一把锁串行化。"""
+"""单进程平台会话缓存；状态修改按平台加锁，只读身份快照不触发续期或清理。"""
 
 import asyncio
 import secrets
@@ -152,6 +152,18 @@ class PlatformSessionService:
         async with self._locks[code]:
             await self._expire(code)
             return self._token_to_code.get(access_token)
+
+    def inspect_platform(self, access_token: str) -> str | None:
+        """只读校验平台令牌，返回当前有效身份；不续期、不清理、不等待资源锁。"""
+        if self._closing:
+            return None
+        # 同一事件循环内无 await，读取不会与登录、续期或释放过程交错。
+        # 同时核对双向映射，异常孤立记录不能作为跨服务可信身份。
+        code = self._token_to_code.get(access_token)
+        if (code not in self._platforms or self._code_to_token.get(code) != access_token
+                or self._expires_at.get(access_token, 0) <= self._clock()):
+            return None
+        return code
 
     @asynccontextmanager
     async def consumer_resources(self, code: str, token: str, stream: str):

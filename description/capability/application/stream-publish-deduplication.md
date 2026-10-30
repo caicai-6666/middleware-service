@@ -2,7 +2,7 @@
 
 `StreamPublishDeduplicator` 在 `app/service/stream_deduplication.py` 中复用流历史扫描、业务键索引、并发锁及发布占位，根据实际接收方已持久化的确认 offset，拒绝尚未完成的重复消息。
 
-本文是共用机制的主文档；各接口的字段和响应分别见[入库申请](../../api/ingestion.md)、[删除申请](../../api/deletion.md)、[入库审核结果](../../api/ingestion-review.md)、[删除审批结果](../../api/deletion-review.md)。
+本文是共用机制的主文档；各接口的字段和响应分别见[入库申请](../../api/ingestion.md)、[删除申请](../../api/deletion.md)、[入库审核结果](../../api/ingestion-review.md)、[删除审批结果](../../api/deletion-review.md)和[文件权限调整](../../api/file-permission.md)。
 
 ---
 
@@ -14,6 +14,7 @@
 | `deletion-requests` | `(platform_code, source_id)` | `<registry_code>:<deletion_request_stream>` | 已接入。 |
 | `ingestion-results` | `(target_platform_code, request_id)` | `<target_platform_code>:<ingestion_result_stream>` | 已接入，按目标子平台独立判断。 |
 | `deletion-results` | `(target_platform_code, request_id)` | `<target_platform_code>:<deletion_result_stream>` | 已接入，按目标子平台独立判断，目标通过 ack 推进进度。 |
+| `file-permission-adjustments` | `(target_platform_code, source_id)` | `<target_platform_code>:<file_permission_stream>` | 已接入，按目标子平台独立判断。 |
 
 所有流名称、registry 代码和 RabbitMQ 连接参数来自现有配置。业务键精确比较，区分大小写，不裁剪空白；平台身份仍由 token 决定。不同流使用独立服务对象、索引和锁，不共享确认进度。
 
@@ -32,7 +33,7 @@
 | `app/service/stream_deduplication.py` | 共享算法：恢复及增量更新业务键索引，读取接收方确认进度，保护同键检查和发布。 |
 | `app/service/ingestion_deduplication.py` | 入库申请配置适配，复用共享算法，保留原服务和异常导入名称。 |
 | `app/service/ingestion.py`、`app/service/deletion.py` | 先认证授权及去重，再发布和登记占位；只有入库申请保存新附件，删除申请直接发送业务信息。 |
-| `app/service/review.py`、`app/service/deletion_review.py` | 分别组装入库和删除结果业务字段，调用共用结果发布流程。 |
+| `app/service/review.py`、`app/service/deletion_review.py`、`app/service/file_permission.py` | 分别组装入库结果、删除结果和文件权限调整业务字段，调用共用结果发布流程。 |
 | `app/service/result_message.py` | 确认 registry 权限和目标有效性，以目标代码及原请求 ID 去重，发布并保留确认不确定占位。 |
 | `app/infrastructure/stream_stats.py` | 补充原生 StreamStats、ResolveOffsetSpec 查询和最后一个业务块读取，确定扫描终点。 |
 | `app/router/ingestion.py`、`app/router/deletion.py`、`app/router/ingestion_review.py`、`app/router/deletion_review.py` | 重复转换为 409，无法可靠判断转换为 503。 |

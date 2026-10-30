@@ -8,12 +8,13 @@
 
 ## 当前能力
 
-- **平台认证**：启动时将 YAML 平台白名单加载至内存，通过平台代号和密钥登录；后续接口统一使用 Bearer Token 识别调用平台。
-- **用户缓存**：knowledge-accumulation 与注册中心可维护用户总表，knowledge-accumulation 写入成功登录缓存，注册中心维护单用户增量资料；以 `userid` 为索引存入 Redis，登录缓存按统一 TTL 自动失效，其他平台按用户 `access_token` 查询有效登录并续期；详见[用户 Redis 缓存](description/capability/application/user-cache.md)。
+- **平台认证**：启动时将 YAML 平台白名单加载至内存，通过平台代号和密钥登录；后续接口统一使用 Bearer Token 识别调用平台，注册中心可只读验证其他平台令牌。
+- **用户缓存**：knowledge-accumulation 与注册中心可维护用户总表，knowledge-accumulation 写入成功登录缓存，注册中心维护单用户增量资料；资料支持多部门名称列表，并提供仅返回调用平台文件等级的只读查询；以 `userid` 为索引存入 Redis，登录缓存按统一 TTL 自动失效，其他平台按用户 `access_token` 查询有效登录并续期；详见[用户 Redis 缓存](description/capability/application/user-cache.md)。
 - **平台管理员缓存**：以平台代码维护多个管理员 userid，使用 Redis Set 去重，提供 knowledge-accumulation 与注册中心可调用的全量更新接口、注册中心专用的增删接口、当前平台管理员列表和内部成员判断方法，见[平台管理员缓存](description/capability/application/platform-admin-cache.md)。
 - **会话保活**：心跳延长会话有效期，定期清理失活平台，并释放其 Stream 客户端资源；同一平台仅允许一个有效登录会话。
 - **消息流转**：支持入库申请、入库审核结果、删除申请、删除审批结果和文件权限调整五个流，每个流提供 `publish`、`pull`、`ack` 接口。
 - **个人助理任务**：每用户一条独立 Redis 任务队列，支持四档优先级及多附件；连续用户消息在发布时合并，仅以分隔线拼接正文并保留各条消息所属附件，领取后冻结。平台交付结果后确认任务，助理之间通过目标任务队列通信，可查询执行中任务及上次成功确认心跳的时间，见[助理任务接口](description/api/assistant-task.md)。
+- **平台 A2A**：广播、首次单聊和续聊共用 Redis 请求队列；首次结果按广播 ID 聚合读取和整轮关闭，带 response_id 的定向请求结果进入单聊反馈流，由顶层按独立窗口持续领取、逐条确认。回复写入自动完成子平台原请求，无需 requests/ack，见[平台 A2A API](description/api/platform-a2a.md)。
 - **消费确认**：有界批量预取、逐条交付；处理完成后显式确认，由 RabbitMQ 保存消费进度，结果流按目标平台过滤。
 - **发布去重**：依据业务标识和实际接收方的消费进度，拒绝尚未确认消息的重复发布。
 - **附件转存**：入库文件保存在本地临时目录，消息仅保存文件引用；registry 可下载文件，确认入库请求后清理附件。新删除申请无需上传文件。
@@ -37,8 +38,8 @@ middleware-service/
 │   ├── ingestion-request/       # file/ 保存入库临时附件
 │   ├── deletion-request/        # file/ 仅兼容历史删除附件
 │   ├── assistant-task/          # file/ 保存助理任务临时附件
-│   ├── rabbitmq-dev/            # 本机自行维护的 RabbitMQ 开发配置
-│   └── redis-dev/               # 本机自行维护的 Redis 开发配置
+│   ├── rabbitmq-dev/            # 历史开发目录占位
+│   └── redis-dev/               # 历史开发目录占位
 ├── description/                 # 接口、设计与运行文档
 ├── .env.example                 # 本机环境配置模板
 ├── Dockerfile                   # 后端生产镜像
@@ -113,7 +114,7 @@ platforms:
     secret: "replace-with-platform-a-secret"
 ```
 
-平台表项可配置 `supports_a2a`（是否参与 A2A 协议）、`is_sub_management_platform`（是否为子管理平台）和 `is_management_entry`（是否为管理平台入口），均默认为 false。`GET /middleware-service/api/platform/list` 返回全部配置平台及这三个标记和 `a2aresponsibility` 职责说明，不改变现有登录和消息权限。子管理平台必须填写非空职责，例如 `a2aresponsibility: 负责解答合同相关问题。`，其他平台可省略，默认为空字符串。旧 show_in_list 字段已移除，升级时需从 YAML 删除；修改配置后重启生效。
+平台表项可配置 `supports_a2a`（是否参与 A2A 协议）、`is_sub_management_platform`（是否为子管理平台）和 `is_management_entry`（是否为管理平台入口），均默认为 false；A2A 子平台须同时启用前两个标记。可用 `a2a_max_inflight`（严格整数 1～100，省略或 null 使用环境默认值）配置本平台的 A2A 请求或单聊反馈窗口，见[平台身份配置](description/capability/application/platform-config.md)。`GET /middleware-service/api/platform/list` 返回全部配置平台及这三个标记和 `a2aresponsibility` 职责说明，不改变现有登录和消息权限。子管理平台必须填写非空职责，例如 `a2aresponsibility: 负责解答合同相关问题。`，其他平台可省略，默认为空字符串。旧 show_in_list 字段已移除，升级时需从 YAML 删除；修改配置后重启生效。
 
 示例密钥必须替换，各平台代号和密钥均须唯一。`RABBITMQ_REGISTRY_PLATFORM_CODE` 必须与注册中心的 `code` 一致。若配置位于其他位置，在启动进程前设置环境变量 `PLATFORM_CONFIG_PATH`，指定 YAML 路径。
 
@@ -131,6 +132,10 @@ platforms:
 | `ASSISTANT_USER_MESSAGE_MERGE_MAX_MESSAGES` / `ASSISTANT_USER_MESSAGE_MERGE_MAX_BYTES` | `20` / `65536`，用户任务的合并条数及原文 UTF-8 总字节阈值 |
 | `ASSISTANT_USER_MESSAGE_MERGE_INTERVAL_SECONDS` | `30`，相邻用户消息的最大合并间隔秒数，合并后创建时间取最晚消息时间 |
 | `ASSISTANT_TASK_MAX_FILES` / `ASSISTANT_TASK_MAX_FILE_BYTES` | `10` / `20971520`，每任务附件数及单文件大小上限，支持 multipart 上传并通过 resource 下载 |
+| `PLATFORM_A2A_MAX_INFLIGHT_PER_PLATFORM` | `3`，平台 YAML 未设置 a2a_max_inflight 时的默认窗口；子平台用于请求、顶层用于单聊反馈，范围 1～100，自动补齐不传 limit |
+| `PLATFORM_A2A_MAX_TASKS_PER_PLATFORM` | `1000`，各子平台未完成请求和顶层未确认单聊反馈的各自容量上限 |
+| `PLATFORM_A2A_LEASE_SECONDS` / `PLATFORM_A2A_PULL_RECEIPT_TTL_SECONDS` | `300` / `86400`，任务租约与领取幂等回执秒数，回执保留不能短于租约 |
+| `PLATFORM_A2A_COMPLETION_RECEIPT_TTL_SECONDS` | `86400`，子平台完成请求和顶层逐条确认反馈的幂等回执保留秒数 |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | Redis 连接地址和密码，启动时必须可连接 |
 | `REDIS_DB` / `REDIS_KEY_PREFIX` / `REDIS_MAX_CONNECTIONS` | 默认 `0` / `middleware-service` / `20` |
 | `RABBITMQ_HOST` / `RABBITMQ_PORT` | 本机默认 `localhost:5552` |
@@ -142,25 +147,22 @@ platforms:
 
 平台 YAML 在启动时读取一次。修改 YAML 或 `.env` 后需重启服务，具体规则见[平台身份配置](description/capability/application/platform-config.md)。
 
+开发时频繁重启调用平台，可使用[平台会话快速失效配置](description/capability/application/platform-session.md#本机开发快速失效配置)。停止心跳后，旧会话会按短有效期自动失效，重新登录主动清理过期会话，无需反复重启中间件。
+
 ### 3. 准备 RabbitMQ 和 Redis
 
 启动后端前，RabbitMQ 必须可连接，已启用 Stream 插件，且上述五个流已经存在。**流由 RabbitMQ 容器初始化，后端启动只做校验，不负责创建。**
 
-当前工作区的本机开发配置若已准备在 `data/rabbitmq-dev/`，可执行：
+本机 IDE 开发使用同级部署项目的 `docker-compose.dev.yml`，同时启动 RabbitMQ 和 Redis。从本项目根目录执行：
 
 ```bash
-docker compose --env-file .env -f data/rabbitmq-dev/docker-compose.yml up -d --build --wait rabbitmq
+docker compose --env-file ../middleware-service-deploy/.env \
+  -f ../middleware-service-deploy/docker-compose.dev.yml up -d --build --wait
 ```
 
-首次拉取仓库不会获得该目录内的开发配置，需要另行准备或连接已初始化的 RabbitMQ。配置组成及地址要求见 [RabbitMQ Streams 本地开发环境](description/capability/infrastructure/rabbitmq-stream.md)，容器初始化规则见[业务流启动初始化](description/capability/infrastructure/stream-initialization.md)。
+先在 deploy 目录按其 `.env.example` 准备实际 `.env`，并将本项目 `.env` 的 RabbitMQ、Redis 凭据与之保持一致；本机连接地址为 `127.0.0.1:5552` 和 `127.0.0.1:6379`。生产 Compose 使用独立项目名、网络和数据卷。未取得 deploy 仓库时，也可连接已初始化的中间件，后端仓库不分发本机 Compose。
 
-Redis 也必须可连接。填写 `.env` 中的 Redis 密码；当前工作区本机配置已准备在 `data/redis-dev/` 时执行：
-
-```bash
-docker compose --env-file .env -f data/redis-dev/docker-compose.yml up -d --build --wait redis
-```
-
-该开发配置不随 Git 分发，依赖同级 deploy 的 `redis/` 构建目录；首次拉取后的准备方式见 [Redis 部署](description/capability/infrastructure/redis.md)。
+RabbitMQ 配置与广播地址见 [RabbitMQ Streams 本地开发环境](description/capability/infrastructure/rabbitmq-stream.md)，Redis 连接与持久化见 [Redis 部署](description/capability/infrastructure/redis.md)。原 `data/rabbitmq-dev/`、`data/redis-dev/` 仅保留占位，不再作为当前启动入口；历史开发卷不会自动迁移到新 Compose。
 
 ### 4. 启动与验证
 
@@ -168,7 +170,7 @@ docker compose --env-file .env -f data/redis-dev/docker-compose.yml up -d --buil
 python -m app.main
 ```
 
-本地监听 `127.0.0.1:22000`，支持 `app/` 下 Python 代码热重载。重载会清空内存会话，调用平台需要重新登录，Redis 用户资料和仍有效的用户登录不主动清空。
+本地监听 `127.0.0.1:22000`，默认单 worker，关闭热重载；修改代码后需手动重启。需要开发热重载时使用[显式 Uvicorn 命令](description/capability/application/fastapi.md#安装与启动)。重启会清空内存会话，调用平台需要重新登录，Redis 用户资料和仍有效的用户登录不主动清空。
 
 ```bash
 curl http://127.0.0.1:22000/middleware-service/api/health

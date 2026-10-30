@@ -2,6 +2,8 @@
 
 本模块以 userid 为索引，维护用户资料及登录状态。Redis 是这两类数据的统一存储，后端不保留另一份用户内存缓存；当前尚未将用户权限接入消息接口授权。
 
+已提供[本平台文件权限查询](../../api/user.md#查询用户在本平台的文件权限)，用于 A2A 等只有可信 userid 的场景，由调用平台服务端执行本平台文件过滤；消息路由不自动代行业务资源过滤。
+
 外部契约见[用户 API](../../api/user.md)，容器与本机连接方式见 [Redis 部署](../infrastructure/redis.md)。
 
 ## 职责与存储结构
@@ -24,15 +26,15 @@
 | `middleware-service:users:token:<access_token>` | String | 值为 userid，供用户 token 查询；与登录记录同时写入、续期和过期。 |
 | `middleware-service:users:revision` | String | 资料版本随机标识，每次资料写入变化，保护总表替换并发一致性。 |
 
-资料 JSON 仅包含 userid、username、permissions。JSON 由 Python 编解码，Lua 不解析权限数值，避免大整数精度和空权限对象形态变化。资料返回为不可变快照，权限映射复制并设为只读。
+资料 JSON 包含 userid、username、permissions、departments。departments 是部门名称字符串数组，可有多个部门；名称去除首尾空白后非空且不可重复，不接受 null，顺序不表示主部门或权限。旧 JSON 缺少该字段时按空列表读取，无需改 Redis 键或执行数据迁移；新写入完整保存该字段，内部快照用 tuple 防止外部修改。JSON 由 Python 编解码，Lua 不解析权限数值，避免大整数精度和空权限对象形态变化。资料返回为不可变快照，权限映射复制并设为只读。
 
 平台与多个管理员 userid 的集合独立存储，使用 Redis Set，存储契约及内部方法见[平台管理员缓存](platform-admin-cache.md)。
 
 ## 总表与增量资料
 
-总表接口允许 knowledge-accumulation 与 RABBITMQ_REGISTRY_PLATFORM_CODE 指定的注册中心调用，整表校验后原子替换资料 Hash，移除表外用户的登录键，保留表内已有用户的原登录 TTL；新增用户不会自动登录，空数组清空资料及对应登录状态。读取旧版本和用户列表后，在 Lua 中核对版本并提交，期间若发生并发资料写入则重新读取，最多重试 8 次，持续冲突返回 503。
+总表接口允许 knowledge-accumulation 与 RABBITMQ_REGISTRY_PLATFORM_CODE 指定的注册中心调用，整表校验后原子替换资料 Hash，移除表外用户的登录键，保留表内已有用户的原登录 TTL；新增用户不会自动登录，空数组清空资料及对应登录状态。完整用户项省略 departments 时按 [] 写入，会清空原部门；总表替换不会保留省略字段的旧值。读取旧版本和用户列表后，在 Lua 中核对版本并提交，期间若发生并发资料写入则重新读取，最多重试 8 次，持续冲突返回 503。
 
-单用户更新仅注册中心可调用，只改提供的字段。新增必须提供完整用户名和权限；权限映射整体替换，空对象撤销全部权限。先读取资料、在 Python 合并，再通过 Lua 比较原始 JSON 后写入，冲突最多重试 8 次，避免并发的用户名更新和权限更新互相覆盖。资料操作不创建登录状态，也不续期用户或平台会话。
+单用户更新仅注册中心可调用，只改提供的字段。新增必须提供完整用户名和权限；权限映射整体替换，空对象撤销全部权限。departments 提供时整体替换，[] 清空，省略保留已有部门，显式 null 拒绝；新建用户部门可省略，仍须提供用户名和权限。仅更新部门也合法。先读取资料、在 Python 合并，再通过 Lua 比较原始 JSON 后写入，冲突最多重试 8 次，避免并发的用户名、部门和权限更新互相覆盖。资料操作不创建登录状态，也不续期用户或平台会话。
 
 所有写入前校验未知字段、类型、空白标识、重复 userid 和未配置的权限平台。权限值为严格整数，不接受布尔值、字符串或小数；等级含义由业务方定义。
 
@@ -40,17 +42,17 @@
 
 ## 用户登录与 TTL 退出
 
-用户资料通过总表和单用户增量接口维护，与登录有效期独立。knowledge-accumulation 平台验证用户身份并确认登录成功后，调用 `PUT /middleware-service/api/user/login-cache`，必须传 userid 与用户 access_token；不传 is_logged_in、不传 TTL。平台认证仍使用请求头中的平台 Bearer 令牌。
+用户资料通过总表和单用户增量接口维护，与登录有效期独立。部门归属不自动改变整数文件权限或平台管理员集合。knowledge-accumulation 平台验证用户身份并确认登录成功后，调用 `PUT /middleware-service/api/user/login-cache`，必须传 userid 与用户 access_token；不传 is_logged_in、不传 TTL。平台认证仍使用请求头中的平台 Bearer 令牌。
 
 服务在 Lua 中原子检查资料存在，并写入双向登录映射及同一 TTL。同一用户再次登录时移除旧 token 索引，只保留当前 token；有效 token 已归属其他用户时返回 409，不修改任何登录记录。资料未同步时返回 404，不创建登录键；重复成功登录通知会重设完整 TTL。过期后由新的成功登录事件重新写入。
 
-后续查询通过 `POST /middleware-service/api/user/login-cache`，请求仅包含用户 access_token，按 token 解析 userid，只对已有有效登录续期。有效时同时返回用户当前 username；无效 token 返回 userid=null、username=null、is_logged_in=false、ttl=0。没有及时续期时，Redis 自动让登录键过期，即视为退出，无需持续同步布尔状态或发送用户心跳。is_logged_in 仅作为响应中根据键存在性和 TTL 计算的结果，不是缓存中的资料字段。
+后续查询通过 `POST /middleware-service/api/user/login-cache`，请求仅包含用户 access_token，按 token 解析 userid，只对已有有效登录续期。有效时同时返回用户当前 username 和 departments；有效登录无部门时 departments=[]，无效 token 返回 userid=null、username=null、departments=null、is_logged_in=false、ttl=0。没有及时续期时，Redis 自动让登录键过期，即视为退出，无需持续同步布尔状态或发送用户心跳。is_logged_in 仅作为响应中根据键存在性和 TTL 计算的结果，不是缓存中的资料字段。
 
 平台心跳现在只续期平台会话，不访问 Redis，不接收 users（包括空列表和 null，均返回 422）。旧的 UserUpdate、update_many 和 sync_logins 已移除。用户总表和部分资料更新不会自动登录或续期；管理员集合也与登录键独立。
 
 ## 登录查询与续期
 
-登录缓存查询续期接口向所有已登录平台开放，写入接口仅允许 knowledge-accumulation。Lua 原子检查 token 索引、用户资料、登录记录与 token 一致且两份键均具有有效 TTL，然后使用 EXPIRE 为两份键设置完整有效期，并返回同次读取的用户资料，由服务层解析用户名。查询不会创建登录键，不会复活未知、未登录、已过期或无 TTL 的异常登录记录；无效的孤立 token 索引会被清理，总表移除用户时同时删除登录记录和 token 索引。
+登录缓存查询续期接口向所有已登录平台开放，写入接口仅允许 knowledge-accumulation。Lua 原子检查 token 索引、用户资料、登录记录与 token 一致且两份键均具有有效 TTL，然后使用 EXPIRE 为两份键设置完整有效期，并返回同次读取的用户资料，由服务层解析用户名和部门。查询不会创建登录键，不会复活未知、未登录、已过期或无 TTL 的异常登录记录；无效的孤立 token 索引会被清理，总表移除用户时同时删除登录记录和 token 索引。
 
 有效时返回 is_logged_in=true 和完整 TTL，默认 90 秒；无效返回 false、ttl=0。有效查询持续发生时用户持续存活，直到总表移除或登录键自然过期。用户登录续期不延长调用平台本身的会话。
 
@@ -59,6 +61,7 @@
 | 方法 | 行为 |
 | --- | --- |
 | `await get_info(userid)` | 查询资料，缺失返回 None，与登录 TTL 无关。 |
+| `await get_file_permission(userid, platform_code)` | 只读权威资料，返回该用户在认证平台的文件等级；未登记或无键为未授权，显式 0 有效，不读取登录或管理员键。 |
 | `await get(userid)` | 读取资料与有效登录快照，不续期；无有效登录返回 None。 |
 | `await is_login_valid(userid)` | 只读登录有效性判断，不续期。 |
 | `await touch_login(access_token)` | 查询并原子续期有效登录。 |
@@ -67,6 +70,18 @@
 | `await create_login(userid, access_token)` | knowledge-accumulation 平台的成功登录通知，要求资料存在，原子绑定用户 token 并设置双向映射的 TTL。 |
 
 只读快照 TTL 按剩余毫秒向上取整，调用方不能长期持有旧快照判断有效性。Redis 负责过期，无本机清理任务。
+
+---
+
+## 本平台文件权限只读查询
+
+`app/router/user.py` 的 query_user_file_permission 使用 require_platform 认证，JSON body 复用禁止额外字段的 UserKey，只接受 userid；平台代码从 AuthenticatedPlatform.code 获取。有效登录平台均可调用，不要求平台管理员，不使用用户 access_token。
+
+`UserService.get_file_permission` 复用 get_info 的单次 Redis HGET，解析当前资料并核对资料正文 userid 与查询索引一致。缺失用户或没有本平台权限键时返回 file_level=null；显式存在等级 0 时返回 file_level=0。UserFilePermission 模型只包含严格非负整数或 null 的 file_level 字段，不是裸数字，不返回用户、平台标识或完整权限映射。
+
+本接口要求本平台等级为严格非负整数，拒绝布尔、字符串、小数、null 和负数；资料或等级异常与 Redis 故障统一通过 UserStorageUnavailableError 返回 503，调用方必须拒绝放行。既有用户权限维护接口的有符号整数规则不变，不在本次全局调整历史等级语义。
+
+查询不访问用户登录键、token 索引或平台管理员集合，不创建、续期或撤销登录；未登录及登录已过期的用户，只要资料仍有效，都按本平台当前权限返回。每次实时读取，无独立权限缓存；调用方应在文件读取或会话续接时复查，服务端过滤文件，不将等级传给模型。本次不增加 Redis 键、运行配置或第三方依赖。
 
 ---
 
@@ -98,3 +113,10 @@
 ## 验证
 
 用户测试连接真实 Redis，使用随机键前缀隔离，仅清理测试前缀，不清空共享数据库。覆盖 token 查询、换 token 失效、跨用户 token 冲突、双键续期、总表替换及版本冲突、并发部分字段更新、大整数权限、自动过期、资料移除与登录写入/查询并发、跨服务实例共享、用户写入/查询权限隔离、旧心跳 users 拒绝、平台心跳不访问 Redis、Redis 故障 503、启动失败关闭连接池，以及应用停机保留数据。测试目录按当前 Git 白名单仅保留在本机。
+
+2026-10-26 使用独立 Redis 7.4.8 临时容器完成本平台文件权限的 9 项测试，全部通过：平台隔离和最小响应、等级 0 与缺失键区分、权限降级及撤销即时生效、无需用户登录及查询不改变双向 TTL、非法数据及身份不一致拒绝、既有负整数写入兼容与大整数精度、平台认证和额外参数拒绝、Redis 故障及错误键类型 503、OpenAPI 字段范围。测试位于本机忽略目录 tests/test_user_file_permission.py，结束后清理自身前缀并移除容器，未操作业务数据。
+
+
+2026-10-29 多部门契约扩展：资料同步、部分更新、Redis 编解码和登录查询响应支持 departments，具体字段约束与完整替换/增量保留语义以[用户 API](../../api/user.md)为准。调用方若严格拒绝未知响应字段，需要同步更新 DTO；本次仅修改中间件，不自动重启 IDE 服务或改写业务用户资料。
+
+多部门扩展验证：新增 10 项多部门用例与既有 9 项文件权限回归共 19 项全部通过。使用独立 Redis 7.4.8 临时容器和真实 ASGI 路由，覆盖多部门持久化、空白/重复/非法输入拒绝、旧 JSON 兼容、全量与增量语义、并发更新、登录查询最新资料与 TTL、认证隔离及 OpenAPI 字段约束。测试位于本机忽略目录 tests/test_user_departments.py 和 tests/test_user_file_permission.py，完成后移除临时容器，未访问或改写业务 Redis。

@@ -31,7 +31,7 @@
 
 ## 配置
 
-生产配置来自 deploy `.env`，本机开发来自本项目根 `.env`。业务后端环境变量优先于应用目录的 `.env`；RabbitMQ 镜像不依赖后端代码或 Python 依赖包。
+容器配置来自 deploy `.env`，宿主机运行的本机后端读取本项目根 `.env`，两份配置需保持对应连接信息一致。业务后端环境变量优先于应用目录的 `.env`；RabbitMQ 镜像不依赖后端代码或 Python 依赖包。
 
 | 配置项 | 默认值或要求 |
 | --- | --- |
@@ -56,10 +56,13 @@
 
 ## 本机开发与验证
 
-本机配置在 `data/rabbitmq-dev/`，包含生产初始化实现的本地副本及 localhost 广播配置，不放在 deploy。开发 Dockerfile 和 bootstrap.py 的主实现来自生产 rabbitmq 目录，本地副本需同步；目录内容按 data 规则忽略且不进入后端镜像，拉取代码后由开发人员准备。
+本机开发使用同级 `middleware-service-deploy/docker-compose.dev.yml`，复用 deploy 的 RabbitMQ Dockerfile、bootstrap.py 和插件列表，只通过只读挂载 `rabbitmq/rabbitmq.dev.conf` 将 Stream 广播地址改为宿主机可达的 `127.0.0.1`。不再维护 `data/rabbitmq-dev/` 下的初始化副本；开发项目、网络和卷与生产独立。
+
+从应用项目根目录执行；两份 `.env` 中的 RabbitMQ 凭据、vhost 和流名须一致：
 
 ```bash
-docker compose --env-file .env -f data/rabbitmq-dev/docker-compose.yml up -d --build --wait rabbitmq
+docker compose --env-file ../middleware-service-deploy/.env \
+  -f ../middleware-service-deploy/docker-compose.dev.yml up -d --build --wait rabbitmq
 ```
 
 后端单元测试覆盖只检查、不创建、缺失流失败及资源关闭。容器验证应使用独立测试卷，覆盖空卷五流创建、已存在流重复启动、消息及 offset 保留、配置错误和初始化失败阻止健康检查；验证完成后清理测试容器与测试卷。日常开发环境与生产数据卷不用于破坏性验证。

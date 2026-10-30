@@ -9,6 +9,9 @@
 | 首次运行或部署项目 | [项目 README](../README.md) | 当前能力、本地启动、消息流转及容器部署入口。 |
 | 了解项目或开始开发 | [项目目标说明](project.md) | 项目定位、建设目标、典型流程与服务边界；开发前必读。 |
 | 新增或修改文档 | [文档撰写风格手册](documentation.md) | 文档命名、目录分层、内容组织、排版及链接维护规范。 |
+| 新增或修改模型提示词、工具 | [提示词工程规范](standard/prompt-engineering.md) | 任务、输入输出、失败边界和实际工具 Schema 的字段描述。 |
+| 新增或修改多轮 Agent | [上下文与记忆管理规范](standard/agent-context-management.md) | 纠错清理、权威工作区、审计及并发隔离。 |
+| 设计验证或分析实验 | [实验验证规范](standard/experiment.md) | 运行隔离、原始产物和追加式分析日志。 |
 
 ---
 
@@ -17,12 +20,18 @@
 | 文档入口 | 内容说明 |
 | --- | --- |
 | [FastAPI 应用基础结构](capability/application/fastapi.md) | 应用入口、路由组织、本地启动和接口文档地址。 |
-| [平台身份配置](capability/application/platform-config.md) | 平台结构体、YAML 的 A2A、子管理平台与管理入口标记、子平台协作职责、默认路径、只读挂载与启动校验。 |
-| [平台会话服务](capability/application/platform-session.md) | 登录缓存、心跳续期、过期清理与本项目环境配置。 |
-| [用户 Redis 缓存](capability/application/user-cache.md) | 用户总表、资料增量更新、登录成功写入和 TTL 滑动续期。 |
+| [平台身份配置](capability/application/platform-config.md) | 平台结构体、YAML 角色标记、协作职责与消费窗口、默认路径、只读挂载与启动校验。 |
+| [平台会话服务](capability/application/platform-session.md) | 登录缓存、心跳续期、注册中心只读令牌校验、过期清理与本项目环境配置。 |
+| [用户 Redis 缓存](capability/application/user-cache.md) | 用户总表、多部门增量资料、登录成功写入、TTL 滑动续期与本平台文件权限查询。 |
 | [平台管理员缓存](capability/application/platform-admin-cache.md) | 平台多管理员 Redis Set、registry 与知识沉淀平台全量、registry 增删、当前平台自查及成员判断。 |
-| [用户接口](api/user.md) | 用户总表与增量资料、用户 token 登录写入及查询续期接口。 |
+| [健康检查接口](api/health.md) | 匿名存活检查及其观测边界。 |
+| [平台接口](api/platform.md) | 平台登录、心跳、只读令牌验证、平台列表及多管理员维护。 |
+| [入库请求接口](api/ingestion.md) | 子平台上传入库附件，注册中心领取与确认。 |
+| [用户接口](api/user.md) | 用户总表与多部门增量资料、用户 token 登录写入及续期、仅返回调用平台等级的文件权限只读查询。 |
 | [助理任务接口](api/assistant-task.md) | 每用户优先级任务发布、多附件与消息归属、用户消息合并与分隔线排版、领取确认及状态查询。 |
+| [平台 A2A 接口](api/platform-a2a.md) | 统一请求、自动完成、广播反馈聚合与关闭、定向单聊反馈领取及逐条确认，共七个接口。 |
+| [平台 A2A 请求队列](capability/application/platform-a2a.md) | Redis 统一请求和两类反馈、子平台与顶层独立窗口、租约、背压、原子操作及验证。 |
+| [平台 A2A 联调与负载验证](capability/application/platform-a2a-validation.md) | 三项目真实模型联调、六子平台负载、容量恢复、连接池瓶颈及回执存储开销。 |
 | [助理任务队列](capability/application/assistant-task.md) | 单队列设计原则、平台交付结果后确认、Redis 排序与正文、执行租约及幂等。 |
 | [入库请求消费服务](capability/application/ingestion-consumer.md) | 注册中心逐条拉取、确认及 offset 恢复。 |
 | [入库发布去重服务](capability/application/ingestion-deduplication.md) | 平台代码与 source_id 去重、确认进度判断、并发保护及索引恢复。 |

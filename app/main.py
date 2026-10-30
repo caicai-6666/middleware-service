@@ -10,6 +10,7 @@ from redis.exceptions import RedisError
 
 from app.config.consumer import load_consumer_cache_settings
 from app.config.assistant import load_assistant_task_settings
+from app.config.platform_a2a import load_platform_a2a_settings
 from app.config.platform import load_platforms_from_env
 from app.config.stream import load_stream_settings
 from app.service.ingestion_consumer import IngestionConsumerService
@@ -32,6 +33,8 @@ from app.infrastructure.redis import create_redis_client
 from app.infrastructure.redis_user import RedisUserStore, UserStorageUnavailableError
 from app.infrastructure.redis_platform_admin import RedisPlatformAdminStore
 from app.infrastructure.redis_assistant import RedisAssistantTaskStore, AssistantStorageUnavailableError
+from app.infrastructure.redis_platform_a2a import RedisPlatformA2AStore, PlatformA2AStorageUnavailableError
+from app.service.platform_a2a import PlatformA2AService
 from app.service.assistant import AssistantTaskService
 from app.service.assistant_file import AssistantFileStore
 from app.service.platform_admin import PlatformAdminService
@@ -51,6 +54,7 @@ async def lifespan(application: FastAPI):
     user_settings = load_user_cache_settings()
     redis_settings = load_redis_settings()
     assistant_settings = load_assistant_task_settings()
+    platform_a2a_settings = load_platform_a2a_settings()
     redis_client = create_redis_client(redis_settings)
     application.state.redis = redis_client
     try:
@@ -143,6 +147,10 @@ async def lifespan(application: FastAPI):
                                max_file_bytes=assistant_settings.max_file_bytes),
         )
         application.state.registry_platform_code = stream_settings.registry_platform_code
+        application.state.platform_a2a = PlatformA2AService(
+            RedisPlatformA2AStore(redis_client, redis_settings.key_prefix, platform_a2a_settings),
+            application.state.platforms,
+        )
         application.state.platform_admins = PlatformAdminService(
             application.state.platforms,
             RedisPlatformAdminStore(redis_client, redis_settings.key_prefix),
@@ -177,6 +185,11 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=503, headers={"Cache-Control": "no-store"},
                             content={"detail": "助理任务存储暂不可用，操作结果可能不确定；发布请用相同 request_id 重试，领取或确认请核对当前任务"})
 
+    @application.exception_handler(PlatformA2AStorageUnavailableError)
+    async def platform_a2a_storage_unavailable(request: Request, error: PlatformA2AStorageUnavailableError):
+        return JSONResponse(status_code=503, headers={"Cache-Control": "no-store"},
+                            content={"detail": "平台 A2A 存储暂不可用或操作结果不确定；发布、关闭沿用 broadcast_id，领取沿用 Idempotency-Key，回复沿用 task_id 及相同凭证和内容，单聊反馈确认沿用 message_id 及反馈凭证重试"})
+
     application.include_router(router, prefix=API_PREFIX)
     return application
 
@@ -192,5 +205,5 @@ if __name__ == "__main__":
     # 热重载需要应用导入字符串；仅监听 app 代码，避免临时业务文件触发重启。
     uvicorn.run(
         "app.main:app", host="127.0.0.1", port=22000,
-        reload=True, reload_dirs=[str(Path(__file__).resolve().parent)], workers=1,
+        reload=False, reload_dirs=[str(Path(__file__).resolve().parent)], workers=1,
     )

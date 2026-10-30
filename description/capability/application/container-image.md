@@ -47,11 +47,11 @@ middleware-service-deploy/
     └── requirement.txt
 ```
 
-部署项目仅维护生产配置，应用服务使用 `build.context: ./middleware-service` 和 `dockerfile: Dockerfile`。生产部署前将应用仓库拉取到部署目录的 `middleware-service/` 子目录，不设置本机同级目录覆盖。
+生产 Compose 的应用服务使用 `build.context: ./middleware-service` 和 `dockerfile: Dockerfile`。生产部署前将应用仓库拉取到部署目录的 `middleware-service/` 子目录，不设置本机同级目录覆盖。
 
 Compose 默认启动后端、RabbitMQ 和 Redis，后端等待两个中间件健康后启动。平台配置只读挂载；deploy 的 `.env` 中的 `RABBITMQ_USER`、`RABBITMQ_PASSWORD` 同时注入 RabbitMQ 和后端容器。后端通过 `rabbitmq:5552` 访问服务，Stream advertised host 为 `rabbitmq`；RabbitMQ 镜像由 deploy/rabbitmq/Dockerfile 构建，容器声明五个流后才通过健康检查，后端随后启动。生产配置不发布 RabbitMQ 端口，项目名称为 `middleware-service`，与开发卷命名独立。
 
-部署 `.env.example` 与 Compose 已同步五个流名称、`RABBITMQ_REGISTRY_PLATFORM_CODE`、`RABBITMQ_VHOST`、会话有效期/心跳/清理周期，用户登录 `USER_CACHE_TTL_SECONDS`、Redis 数据库/键前缀/连接池上限，以及 `INGESTION_CACHE_*`、`REVIEW_CACHE_*`、`DELETION_CACHE_*`、`DELETION_REVIEW_CACHE_*`、`FILE_PERMISSION_CACHE_*` 五组缓存上限。Compose 的 `.env` 用于变量插值，只有在 backend.environment 中显式声明的参数才会进入后端；应用镜像不依赖本地开发 `.env`。具体约束见[会话配置](platform-session.md)、[流配置](../infrastructure/stream-initialization.md)和[结果消费缓存配置](review-consumer.md)。
+部署 `.env.example` 与 Compose 已同步五个流名称、`RABBITMQ_REGISTRY_PLATFORM_CODE`、`RABBITMQ_VHOST`、会话有效期/心跳/清理周期，用户登录 `USER_CACHE_TTL_SECONDS`、Redis 数据库/键前缀/连接池上限，以及 `INGESTION_CACHE_*`、`REVIEW_CACHE_*`、`DELETION_CACHE_*`、`DELETION_REVIEW_CACHE_*`、`FILE_PERMISSION_CACHE_*` 五组缓存上限。平台 A2A 的五项 `PLATFORM_A2A_*` 参数也由 Compose 显式注入，默认值与应用 `.env.example` 保持一致；平台模板使用可选的 `a2a_max_inflight` 设置请求或单聊反馈消费窗口，具体范围与约束见[平台 A2A](platform-a2a.md)。A2A 复用现有 Redis 与 redis-data 卷，不新增 RabbitMQ 流或附件卷。Compose 的 `.env` 用于变量插值，只有在 backend.environment 中显式声明的参数才会进入后端；应用镜像不依赖本地开发 `.env`。具体约束见[会话配置](platform-session.md)、[流配置](../infrastructure/stream-initialization.md)和[结果消费缓存配置](review-consumer.md)。
 
 在 deploy 目录准备 `.env` 和 `platform.yaml` 后启动：
 
@@ -63,7 +63,7 @@ RabbitMQ 的 `RABBITMQ_DEFAULT_USER/PASS` 用于空数据目录的首次初始�
 
 `RABBITMQ_VHOST` 同时注入后端和 RabbitMQ 的 `RABBITMQ_DEFAULT_VHOST`，默认 `/`；后者仅在空数据目录首次初始化时创建默认 vhost。已有卷若更换 vhost，需先创建目标 vhost 并授予现有账号权限。去重、平台会话和待确认缓存目前只支持一个后端进程，保持镜像默认的单 worker 启动方式。
 
-本机开发配置在应用项目 `data/rabbitmq-dev/`，不放在 deploy，也不进入镜像；使用方式见[RabbitMQ 本地开发环境](../infrastructure/rabbitmq-stream.md)。
+本机开发使用 deploy 的 `docker-compose.dev.yml`，仅启动 RabbitMQ 和 Redis；后端在宿主机运行，生产 Compose 的构建路径保持不变。使用方式见[RabbitMQ 本地开发环境](../infrastructure/rabbitmq-stream.md)。
 
 
 ## RabbitMQ 启动依赖
