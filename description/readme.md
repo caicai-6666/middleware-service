@@ -22,12 +22,12 @@
 | [FastAPI 应用基础结构](capability/application/fastapi.md) | 应用入口、路由组织、本地启动和接口文档地址。 |
 | [平台身份配置](capability/application/platform-config.md) | 平台结构体、YAML 角色标记、协作职责与消费窗口、默认路径、只读挂载与启动校验。 |
 | [平台会话服务](capability/application/platform-session.md) | 登录缓存、心跳续期、注册中心只读令牌校验、过期清理与本项目环境配置。 |
-| [用户 Redis 缓存](capability/application/user-cache.md) | 用户总表、多部门增量资料、登录成功写入、TTL 滑动续期与本平台文件权限查询。 |
+| [用户 Redis 缓存](capability/application/user-cache.md) | 用户总表、多部门及任职状态增量资料、登录成功写入、TTL 滑动续期与本平台文件权限查询。 |
 | [平台管理员缓存](capability/application/platform-admin-cache.md) | 平台多管理员 Redis Set、registry 与知识沉淀平台全量、registry 增删、当前平台自查及成员判断。 |
 | [健康检查接口](api/health.md) | 匿名存活检查及其观测边界。 |
 | [平台接口](api/platform.md) | 平台登录、心跳、只读令牌验证、平台列表及多管理员维护。 |
 | [入库请求接口](api/ingestion.md) | 子平台上传入库附件，注册中心领取与确认。 |
-| [用户接口](api/user.md) | 用户总表与多部门增量资料、用户 token 登录写入及续期、仅返回调用平台等级的文件权限只读查询。 |
+| [用户接口](api/user.md) | 用户总表逐用户状态回执、多部门及任职状态增量资料、用户 token 登录写入及续期、仅返回调用平台等级的文件权限只读查询。 |
 | [助理任务接口](api/assistant-task.md) | 每用户优先级任务发布、多附件与消息归属、用户消息合并与分隔线排版、领取确认及状态查询。 |
 | [平台 A2A 接口](api/platform-a2a.md) | 统一请求、自动完成、广播反馈聚合与关闭、定向单聊反馈领取及逐条确认，共七个接口。 |
 | [平台 A2A 请求队列](capability/application/platform-a2a.md) | Redis 统一请求和两类反馈、子平台与顶层独立窗口、租约、背压、原子操作及验证。 |

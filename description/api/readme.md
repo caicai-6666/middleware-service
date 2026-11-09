@@ -51,6 +51,8 @@
 | [读取助理任务附件](resource.md#读取助理任务附件) | `GET` | `/middleware-service/api/resource/assistant-tasks/{file_id}` |
 
 
+用户资料支持 employment_status（在职/离职）：全表注册返回逐用户状态，增量更新和登录查询响应携带当前状态；仅记录资料，不改变登录或权限判断，详见[用户 API](user.md)。
+
 平台 A2A 七个接口均已接入 Redis：统一请求发布和领取，回复发布时按原请求是否携带 response_id 分流并自动完成请求；首次结果通过 replies/pull、replies/ack 聚合读取和关闭，定向单聊结果通过 direct-replies/pull、direct-replies/ack 持续领取和逐条确认，顶层窗口独立。无 requests/ack，详见[平台 A2A API](platform-a2a.md)，不影响个人助理任务。
 
 删除申请及删除审批结果 publish/pull/ack 均已实现。结果按认证子平台过滤，确认后推进该平台在对应结果流中的独立进度。

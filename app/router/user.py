@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.router.dependencies import AuthenticatedPlatform, require_platform, require_registry, require_knowledge_accumulation, require_user_table_writer
 from app.service.user import (
     UserInfo, UserInfoPatch, UserLoginRequest, UserToken, UserKey, UserFilePermission,
-    UserNotFoundError, UserTokenConflictError, Departments,
+    UserNotFoundError, UserTokenConflictError, Departments, EmploymentStatus,
 )
 
 router = APIRouter(prefix="/user", tags=["用户"])
@@ -20,8 +20,13 @@ class UserTableRequest(BaseModel):
     users: list[UserInfo] = Field(description="完整用户信息总表；按 userid 重建，未包含的用户及其登录缓存被移除，空数组清空总表。")
 
 
+class UserEmploymentStatusResponse(UserKey):
+    employment_status: EmploymentStatus = Field(description="本次全表同步成功保存的任职状态：employed 在职，resigned 离职；只返回用户标识及状态，不返回用户令牌。")
+
+
 class UserTableResponse(BaseModel):
     count: int = Field(description="重建后用户信息总表中的用户总数。")
+    users: list[UserEmploymentStatusResponse] = Field(description="本次全表同步成功保存的各用户标识与任职状态，顺序与请求一致；空总表返回 []。这是本次写入结果，不保证后续并发更新后仍为此状态。")
 
 
 class UserLoginResponse(BaseModel):
@@ -33,6 +38,7 @@ class UserLoginResponse(BaseModel):
 class UserLoginQueryResponse(UserLoginResponse):
     username: str | None = Field(description="有效登录对应用户的当前用户名；令牌无效或过期时为 null。")
     departments: Departments | None = Field(description="有效登录对应用户当前所属的部门名称列表，无部门或旧资料为 []；用户令牌无效或过期时为 null，不表示文件权限或管理员身份。")
+    employment_status: EmploymentStatus | None = Field(description="有效登录对应用户当前任职状态：employed 在职，resigned 离职，旧资料缺字段时为 employed；用户令牌无效或过期时为 null。不改变登录有效性或权限。")
 
 
 @router.post('/file-permission', response_model=UserFilePermission, summary='查询用户在本平台的文件权限',
@@ -81,7 +87,11 @@ async def replace_user_table(
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from None
     response.headers["Cache-Control"] = "no-store"
-    return UserTableResponse(count=count)
+    return UserTableResponse(
+        count=count,
+        users=[UserEmploymentStatusResponse(userid=user.userid, employment_status=user.employment_status)
+               for user in body.users],
+    )
 
 
 @router.post("/update", response_model=UserInfo, summary="更新单个用户信息",
@@ -97,7 +107,7 @@ async def update_user_info(
         raise HTTPException(status_code=422, detail=str(error)) from None
     response.headers["Cache-Control"] = "no-store"
     return UserInfo(userid=user.userid, username=user.username, permissions=dict(user.permissions),
-                    departments=list(user.departments))
+                    departments=list(user.departments), employment_status=user.employment_status)
 
 
 @router.post("/login-cache", response_model=UserLoginQueryResponse, summary="查询并续期用户登录缓存",
@@ -110,4 +120,5 @@ async def query_user_login(
     response.headers["Cache-Control"] = "no-store"
     return UserLoginQueryResponse(userid=status.userid, username=status.username,
                                   departments=list(status.departments) if status.departments is not None else None,
+                                  employment_status=status.employment_status,
                                   is_logged_in=status.is_logged_in, ttl=status.ttl)

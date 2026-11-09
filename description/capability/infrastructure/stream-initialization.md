@@ -17,7 +17,7 @@
 
 新增流升级时先重建并启动 RabbitMQ 镜像，确认健康后再启动新后端。导入每次启动均执行，以补齐缺失流；已存在且兼容的流直接复用，不删除重建，不清空消息、offset 或生产者追踪记录。类型或声明参数不兼容时初始化失败，不覆盖原流。RabbitMQ 官方支持通过 CLI 导入 definitions，详见[官方定义导入说明](https://www.rabbitmq.com/docs/definitions#definition-import)。
 
-初始化完成后生成 `/tmp/middleware-streams-ready`；镜像健康检查同时要求该标记存在和 `rabbitmq-diagnostics check_running` 通过。初始化失败时移除标记、停止 broker 并返回非零状态，Compose 的后端依赖不会就绪。Python 入口转发停止信号并等待 broker 退出，关闭容器不会删除数据卷。
+初始化完成后生成 `/tmp/middleware-streams-ready`；镜像健康检查同时要求该标记存在和 `rabbitmq-diagnostics check_running` 通过。初始化失败时移除标记、停止 broker 并返回非零状态，Compose 的后端依赖不会就绪。生产和开发 Compose 均启用 `init: true`，由 Docker init 作为 PID 1 回收健康检查或 Erlang CLI 遗留的孤儿子进程。Python 入口继续转发停止信号并等待 broker 退出，关闭容器不会删除数据卷。直接 docker run 使用该镜像时需添加 `--init`。
 
 ---
 

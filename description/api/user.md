@@ -19,7 +19,7 @@
 
 ## 重建用户信息总表
 
-`POST /middleware-service/api/user/full-table`，由注册中心或 knowledge-accumulation 平台发送，立即按整张表重建用户信息、多部门归属与平台权限映射。
+`POST /middleware-service/api/user/full-table`，由注册中心或 knowledge-accumulation 平台发送，立即按整张表重建用户信息、多部门归属、任职状态与平台权限映射。
 
 ### 认证方式
 
@@ -36,8 +36,11 @@
 | `users[].username` | string | 是 | 用户名，非空且不全为空白。 |
 | `users[].permissions` | object | 是 | 键为 YAML 中配置的 platform_code，值为严格整数；允许空对象，拒绝布尔、字符串及小数值。 |
 | `users[].departments` | string[] | 否 | 所属部门名称列表，默认 `[]`；允许多部门，名称去除首尾空白后必须非空且不可重复，不接受 null。 |
+| `users[].employment_status` | string | 否 | 任职状态，仅接受 `employed`（在职）或 `resigned`（离职），默认 `employed`，不接受 null、布尔值、数字或其他字符串。 |
 
 `departments` 保存部门名称，不解释部门 ID、层级或主部门，顺序不表示权限优先级。例如 `["财务部","采购部"]`。完整总表中省略该字段等同于 `[]`，会清空该用户原有部门；仅希望保留旧部门时应使用增量更新接口。旧 Redis 资料缺少该字段时按 `[]` 读取，无需迁移。部门归属不自动赋予权限或管理员身份。
+
+`employment_status` 仅是资料标识。全表省略该字段按 `employed` 保存，会覆盖原有离职状态；维护方应传入权威状态，若仅改其他字段并保留任职状态，应使用单用户增量更新。旧 Redis 资料缺少该字段时按 `employed` 读取，不自动回写或迁移。状态不影响登录、文件权限或管理员身份。
 
 不能携带 `is_logged_in` 或 `ttl`；同步信息不会创建登录状态。
 
@@ -46,10 +49,10 @@
 状态码 `200`，媒体类型 `application/json`：
 
 ```json
-{"count":2}
+{"count":2,"users":[{"userid":"user-001","employment_status":"employed"},{"userid":"user-002","employment_status":"resigned"}]}
 ```
 
-`count` 表示重建后用户总数。
+`count` 表示重建后用户总数；`users` 按请求顺序逐项返回本次成功保存的 `userid` 和 `employment_status`，不回显用户名、部门、权限或令牌。空总表返回 `{"count":0,"users":[]}`。这是本次写入结果，不保证后续并发更新后的状态仍相同。
 
 ### 错误响应
 
@@ -68,12 +71,12 @@
 curl -X POST 'http://127.0.0.1:22000/middleware-service/api/user/full-table' \
   -H 'Authorization: Bearer replace-with-knowledge-accumulation-access-token' \
   -H 'Content-Type: application/json' \
-  -d '{"users":[{"userid":"user-001","username":"审核员甲","permissions":{"platform-a":2},"departments":["财务部","采购部"]},{"userid":"user-002","username":"审核员乙","permissions":{}}]}'
+  -d '{"users":[{"userid":"user-001","username":"审核员甲","permissions":{"platform-a":2},"departments":["财务部","采购部"],"employment_status":"employed"},{"userid":"user-002","username":"审核员乙","permissions":{},"employment_status":"resigned"}]}'
 ```
 
 ### 行为与边界
 
-全表校验通过后原子替换，失败不影响旧数据。表外用户资料及登录缓存立即移除；保留用户更新资料、部门及权限，但不延长原有登录有效期；新增用户默认为未登录。重复提交同一总表不会为用户续期。本接口不会续期调用平台的会话。
+全表校验通过后原子替换，失败不影响旧数据。表外用户资料及登录缓存立即移除；保留用户更新资料、部门、任职状态及权限，但不延长原有登录有效期；新增用户默认为未登录。重复提交同一总表不会为用户续期。本接口不会续期调用平台的会话。
 
 ---
 
@@ -95,15 +98,16 @@ curl -X POST 'http://127.0.0.1:22000/middleware-service/api/user/full-table' \
 | `username` | string | 条件必填 | 已有用户可省略并保留原值；新增用户必须提供，不能为 null、空字符串或纯空白。 |
 | `permissions` | object | 条件必填 | 已有用户可省略并保留原值；新增用户必须提供。键为已配置 platform_code，值为严格整数，不能为 null。 |
 | `departments` | string[] | 否 | 已有用户省略则保留，`[]` 清空，提供时整体替换；新增用户省略时为 `[]`。名称约束同总表，不接受 null。 |
+| `employment_status` | string | 否 | 仅接受 `employed`（在职）或 `resigned`（离职）；已有用户省略则保留，新增用户省略时为 `employed`，不接受 null 或其他值。 |
 
-`username`、`permissions`、`departments` 至少提供一项。权限是完整映射替换，不逐键合并，传 `{}` 撤销全部权限。请求不接受登录状态或 TTL。
+`username`、`permissions`、`departments`、`employment_status` 至少提供一项。权限是完整映射替换，不逐键合并，传 `{}` 撤销全部权限。请求不接受登录状态或 TTL。
 
 ### 成功响应
 
 状态码 `200`，媒体类型 `application/json`，返回更新后的完整用户资料：
 
 ```json
-{"userid":"user-001","username":"审核员甲","permissions":{"platform-a":2},"departments":["财务部","采购部"]}
+{"userid":"user-001","username":"审核员甲","permissions":{"platform-a":2},"departments":["财务部","采购部"],"employment_status":"employed"}
 ```
 
 字段定义与总表用户项一致，不返回或修改登录状态。
@@ -119,7 +123,7 @@ curl -X POST 'http://127.0.0.1:22000/middleware-service/api/user/full-table' \
 
 ### 请求示例
 
-更新已有用户的用户名，保留原权限及部门：
+更新已有用户的用户名，保留原权限、部门及任职状态：
 
 ```bash
 curl -X POST 'http://127.0.0.1:22000/middleware-service/api/user/update' \
@@ -130,11 +134,13 @@ curl -X POST 'http://127.0.0.1:22000/middleware-service/api/user/update' \
 
 单独替换多部门归属可提交 `{"userid":"user-001","departments":["财务部","采购部"]}`，清空可提交 `{"userid":"user-001","departments":[]}`。
 
-新增用户须同时提供用户名和权限，部门可省略，例如 `{"userid":"user-003","username":"审核员丙","permissions":{"platform-a":1}}`。
+仅更新任职状态可提交 `{"userid":"user-001","employment_status":"resigned"}`，恢复在职可改为 `employed`；成功响应返回完整用户资料及更新后的状态。
+
+新增用户须同时提供用户名和权限，部门及任职状态可省略，例如 `{"userid":"user-003","username":"审核员丙","permissions":{"platform-a":1}}`。
 
 ### 行为与边界
 
-已有用户仅修改提供的资料字段；不存在时校验完整资料后新增。校验失败时不修改任何数据。资料更新不会创建、撤销或续期用户登录状态，用户成功登录后由 knowledge-accumulation 单独写入登录缓存；本接口也不会续期平台会话。
+已有用户仅修改提供的资料字段；不存在时校验完整资料后新增。校验失败时不修改任何数据。资料更新不会创建、撤销或续期用户登录状态，用户成功登录后由 knowledge-accumulation 单独写入登录缓存；本接口也不会续期平台会话。标记为离职不撤销用户 token，不阻止新的成功登录通知，也不修改文件权限或平台管理员；调用方可读取状态后执行自身业务规则。
 
 ---
 
@@ -216,7 +222,7 @@ curl -X PUT 'http://127.0.0.1:22000/middleware-service/api/user/login-cache' \
 状态码 `200`，媒体类型 `application/json`：
 
 ```json
-{"userid":"user-001","username":"审核员甲","departments":["财务部","采购部"],"is_logged_in":true,"ttl":90}
+{"userid":"user-001","username":"审核员甲","departments":["财务部","采购部"],"employment_status":"employed","is_logged_in":true,"ttl":90}
 ```
 
 | 字段 | 类型 | 说明 |
@@ -224,12 +230,13 @@ curl -X PUT 'http://127.0.0.1:22000/middleware-service/api/user/login-cache' \
 | `userid` | string 或 null | 有效 token 对应的用户标识；token 无效或过期时为 null。 |
 | `username` | string 或 null | 用户资料中的当前用户名；token 无效或过期时为 null。 |
 | `departments` | string[] 或 null | 当前部门名称列表；有效登录但没有部门或旧资料无字段时为 `[]`，token 无效或过期时为 null。 |
+| `employment_status` | string 或 null | 有效登录时为当前 `employed`（在职）或 `resigned`（离职）；旧资料缺字段为 `employed`，token 无效或过期时为 null。 |
 | `is_logged_in` | boolean | 查询时是否存在未过期的登录缓存，由键存在性和 TTL 判断。 |
 | `ttl` | integer | 有效时返回续期后的完整有效秒数，默认 90；无效为 0。 |
 
-未知、已替换或过期的 token 都返回 `200`，例如 `{"userid":null,"username":null,"departments":null,"is_logged_in":false,"ttl":0}`，不创建资料或登录记录。有效时返回用户资料中的当前用户名和部门，不返回跨平台权限。用户名、部门与登录校验、续期在同一次 Redis 操作中读取，后续资料更新会在下一次查询反映。
+未知、已替换或过期的 token 都返回 `200`，例如 `{"userid":null,"username":null,"departments":null,"employment_status":null,"is_logged_in":false,"ttl":0}`，不创建资料或登录记录。有效时返回用户资料中的当前用户名、部门和任职状态，不返回跨平台权限。这些资料与登录校验、续期在同一次 Redis 操作中读取，后续资料更新会在下一次查询反映。离职用户仍按原规则返回有效登录并续期，可能同时出现 `employment_status="resigned"` 与 `is_logged_in=true`。
 
-升级后增量资料响应及本查询响应新增 `departments`；严格拒绝未知响应字段的调用方 DTO 需同步接入。登录写入响应及 file-permission 的最小响应结构保持原契约。
+升级后增量资料响应及本查询响应包含 `departments` 和 `employment_status`，全表注册响应新增 `users`；严格拒绝未知响应字段的调用方 DTO 需同步接入。登录写入响应及 file-permission 的最小响应结构保持原契约。
 
 ### 错误响应
 
@@ -323,4 +330,4 @@ curl -X POST 'http://127.0.0.1:22000/middleware-service/api/user/file-permission
 
 权限降低、撤销、总表移除后，后续查询立即反映新的权威资料；单次响应不是永久授权。调用平台应在敏感读取及续聊恢复时重新核对权限，并在服务端过滤文件；等级不应进入模型提示词、工具参数或反馈。本接口不证明调用者已经完成终端用户身份验证，调用平台必须从可信业务上下文绑定 userid，不能让模型或未认证用户任意指定。
 
-权限维护接口沿用既有严格整数契约，不在本次修改。文件权限查询要求等级非负，历史负数在本接口返回 503，需由资料维护方核对修正。不根据其他平台权限或管理员集合推断本平台授权。无需新增 Redis 键、配置或依赖，具体实现见[用户 Redis 缓存](../capability/application/user-cache.md#本平台文件权限只读查询)。
+权限维护接口沿用既有严格整数契约，不在本次修改。文件权限查询要求等级非负，历史负数在本接口返回 503，需由资料维护方核对修正。不根据其他平台权限或管理员集合推断本平台授权。任职状态仅作资料标识，本接口不因 `resigned` 自动撤销或降低等级，也不在响应中增加状态字段。无需新增 Redis 键、配置或依赖，具体实现见[用户 Redis 缓存](../capability/application/user-cache.md#本平台文件权限只读查询)。

@@ -9,7 +9,7 @@
 ## 当前能力
 
 - **平台认证**：启动时将 YAML 平台白名单加载至内存，通过平台代号和密钥登录；后续接口统一使用 Bearer Token 识别调用平台，注册中心可只读验证其他平台令牌。
-- **用户缓存**：knowledge-accumulation 与注册中心可维护用户总表，knowledge-accumulation 写入成功登录缓存，注册中心维护单用户增量资料；资料支持多部门名称列表，并提供仅返回调用平台文件等级的只读查询；以 `userid` 为索引存入 Redis，登录缓存按统一 TTL 自动失效，其他平台按用户 `access_token` 查询有效登录并续期；详见[用户 Redis 缓存](description/capability/application/user-cache.md)。
+- **用户缓存**：knowledge-accumulation 与注册中心可维护用户总表，knowledge-accumulation 写入成功登录缓存，注册中心维护单用户增量资料；资料支持多部门名称列表及在职/离职标识，全表注册和用户信息查询返回任职状态，并提供仅返回调用平台文件等级的只读查询；以 `userid` 为索引存入 Redis，登录缓存按统一 TTL 自动失效，其他平台按用户 `access_token` 查询有效登录并续期；详见[用户 Redis 缓存](description/capability/application/user-cache.md)。
 - **平台管理员缓存**：以平台代码维护多个管理员 userid，使用 Redis Set 去重，提供 knowledge-accumulation 与注册中心可调用的全量更新接口、注册中心专用的增删接口、当前平台管理员列表和内部成员判断方法，见[平台管理员缓存](description/capability/application/platform-admin-cache.md)。
 - **会话保活**：心跳延长会话有效期，定期清理失活平台，并释放其 Stream 客户端资源；同一平台仅允许一个有效登录会话。
 - **消息流转**：支持入库申请、入库审核结果、删除申请、删除审批结果和文件权限调整五个流，每个流提供 `publish`、`pull`、`ack` 接口。

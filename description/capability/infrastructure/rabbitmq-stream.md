@@ -77,6 +77,17 @@ docker compose --env-file ../middleware-service-deploy/.env -f ../middleware-ser
 
 在上述命令前缀下执行 `down` 会删除容器和网络，但保留命名卷；后续使用相同 Compose 配置启动会复用数据。保持 Compose 项目名称与 RabbitMQ 节点名称稳定。不要使用 `down -v`，除非明确需要删除全部开发消息和账号数据。
 
+开发与生产 Compose 均为 RabbitMQ 启用 `init: true`，将孤儿进程回收交给 Docker init。健康检查每 10 秒调用 Erlang CLI，不能仅等待 broker 主进程而忽略其他后代进程；缺少回收时可能出现 PIDs 持续增长，最终健康检查、新容器或 docker exec 因资源不足而失败。Docker 的 PIDs 包含任务和线程，不能等同于 RabbitMQ 连接数或 Erlang 进程数。
+
+已有容器需使用同一 Compose 项目重建才能加载 init；普通 restart 不会改变该选项。从应用项目根目录执行：
+
+```bash
+docker compose --env-file ../middleware-service-deploy/.env \
+  -f ../middleware-service-deploy/docker-compose.dev.yml up -d --no-deps --wait rabbitmq
+```
+
+该操作短暂中断 RabbitMQ 连接，复用原数据卷和 hostname；调用方按现有规则重连或重新登录。保留数据卷，不通过 down -v 处理进程累积。
+
 持久卷用于容器重建后的数据保留，不提供单机突然断电时已确认消息零丢失的保证。Streams 不显式执行 `fsync`，具体边界参见[官方数据安全说明](https://www.rabbitmq.com/docs/streams#data-safety-when-using-streams)。
 
 业务流容量与保留配置的实现状态见[流启动初始化](stream-initialization.md)；历史开发连接检查使用的临时流设置一小时保留期限并在检查结束后删除。
@@ -88,3 +99,6 @@ docker compose --env-file ../middleware-service-deploy/.env -f ../middleware-ser
 2026-10-08 本机验证：容器健康检查、Stream 插件启用、异步发布确认与消费、依赖一致性检查通过。测试消息在强制重建容器后仍可读取，验证完成后已删除临时流；本次不执行真实断电测试。
 
 上述记录属于历史验证。当前开发 Compose 的项目名为 `phenosolar-middleware-dev`，节点名为 `phenosolar-middleware-dev-rabbitmq`，与原 `middleware-service-dev` 的开发数据卷独立；切换不会自动转移旧消息、账号或 offset。生产项目仍为 `middleware-service`，生产应用镜像只依赖 Dockerfile、代码及生产注入参数，构建约定见[应用容器镜像](../application/container-image.md)。
+
+
+2026-11-02 启用容器 init 后复用原开发数据卷重建 RabbitMQ，健康检查恢复，PIDs 从 52774 降至约 40；五个流属性及总计 16 条消息与重建前一致。连续五次健康检查采样均无僵尸进程，PIDs 未逐次增长。独立临时容器的 25 个孤儿进程对照中，未启用 init 时残留 25 个僵尸，启用后为 0；测试容器已清理。该结果验证进程回收机制和本次数据保留，不代替长期稳定性或异常断电验证。

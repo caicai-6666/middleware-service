@@ -4,7 +4,7 @@ import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictInt, StringConstraints, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
@@ -14,6 +14,7 @@ from app.infrastructure.redis_user import RedisUserStore, UserStorageUnavailable
 
 
 PlatformCode = Annotated[str, Field(pattern=r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")]
+EmploymentStatus = Literal["employed", "resigned"]
 
 
 def reject_duplicate_departments(values: list[str]) -> list[str]:
@@ -70,6 +71,7 @@ class UserInfo(UserKey):
     username: str = Field(min_length=1, description="用户展示名称。")
     permissions: dict[PlatformCode, StrictInt] = Field(description="平台权限映射，键为已配置的 platform_code，值为整数等级；空对象撤销全部权限。")
     departments: Departments = Field(default_factory=list, description="用户所属的部门名称列表，名称去除首尾空白后不得为空或重复；无部门、旧资料或完整资料中省略时为 []，不接受 null；列表顺序不表示主部门或权限。")
+    employment_status: EmploymentStatus = Field(default="employed", description="用户任职状态：employed 在职，resigned 离职；完整资料中省略或旧资料缺字段时为 employed，不接受 null。仅为资料标识，不影响登录、文件权限或管理员身份。")
 
     @field_validator("username")
     @classmethod
@@ -90,17 +92,21 @@ class UserFilePermission(BaseModel):
 class UserInfoPatch(UserKey):
     username: str | None = Field(default=None, min_length=1, description="需要更新的用户名；省略保留原值，不接受 null 或纯空白。新增用户必须提供。")
     permissions: dict[PlatformCode, StrictInt] | None = Field(default=None, description="需要整体替换的平台权限；省略保留原值，空对象撤销全部权限，不接受 null。新增用户必须提供。")
-    # None 仅作为省略标记，显式 null 会由下方校验拒绝，OpenAPI 也只声明数组输入。
+    # None 仅作为省略标记，显式 null 会由下方校验拒绝，OpenAPI 不声明 null 输入。
     departments: Departments | SkipJsonSchema[None] = Field(
         default=None, json_schema_extra=lambda schema: schema.pop('default', None),
         description="整体替换的部门名称列表；已有用户省略则保留，[] 清空，不接受 null；名称去除首尾空白后不得为空或重复，新增用户省略时为 []。",
+    )
+    employment_status: EmploymentStatus | SkipJsonSchema[None] = Field(
+        default=None, json_schema_extra=lambda schema: schema.pop('default', None),
+        description="需要更新的任职状态：employed 在职，resigned 离职；已有用户省略则保留，新增用户省略时为 employed，不接受 null。仅记录资料，不禁用登录或文件访问。",
     )
 
     @model_validator(mode="after")
     def validate_patch(self):
         fields = self.model_fields_set - {"userid"}
         if not fields:
-            raise ValueError("至少提供 username、permissions 或 departments 中的一项。")
+            raise ValueError("至少提供 username、permissions、departments 或 employment_status 中的一项。")
         if any(getattr(self, name) is None for name in fields):
             raise ValueError("用户更新字段不能为 null。")
         if self.username is not None and not self.username.strip():
@@ -114,6 +120,7 @@ class UserProfile:
     username: str
     permissions: Mapping[str, int]
     departments: tuple[str, ...] = ()
+    employment_status: EmploymentStatus = "employed"
 
 
 @dataclass(frozen=True)
@@ -124,6 +131,7 @@ class UserSnapshot:
     is_logged_in: bool
     ttl: int
     departments: tuple[str, ...] = ()
+    employment_status: EmploymentStatus = "employed"
 
 
 @dataclass(frozen=True)
@@ -133,6 +141,7 @@ class UserLoginStatus:
     ttl: int
     username: str | None = None
     departments: tuple[str, ...] | None = None
+    employment_status: EmploymentStatus | None = None
 
 
 class UserService:
@@ -154,7 +163,7 @@ class UserService:
     def _encode(user: UserInfo) -> str:
         # 用户资料与登录键分开，资料 JSON 不包含登录状态或有效期。
         return UserInfo(userid=user.userid, username=user.username, permissions=user.permissions,
-                        departments=user.departments).model_dump_json()
+                        departments=user.departments, employment_status=user.employment_status).model_dump_json()
 
     @staticmethod
     def _decode(raw: str) -> UserProfile:
@@ -163,7 +172,7 @@ class UserService:
         except ValueError:
             raise UserStorageUnavailableError() from None
         return UserProfile(info.userid, info.username, MappingProxyType(dict(info.permissions)),
-                           tuple(info.departments))
+                           tuple(info.departments), info.employment_status)
 
     async def replace_all(self, users: list[UserInfo]) -> int:
         self.validate_updates(users)
@@ -185,6 +194,9 @@ class UserService:
                 # 增量省略保留旧部门；新增或旧 JSON 未提供时使用空列表，不改变旧调用的建档要求。
                 departments=(update.departments if update.departments is not None
                              else list(old.departments) if old is not None else []),
+                # 任职状态随资料保存；增量省略保留，旧资料和新增用户兼容为在职，不触碰登录键。
+                employment_status=(update.employment_status if update.employment_status is not None
+                                   else old.employment_status if old is not None else "employed"),
             )
             self.validate_updates([info])
             encoded = self._encode(info)
@@ -227,7 +239,8 @@ class UserService:
         raw, ttl_ms = result
         profile = self._decode(raw)
         return UserSnapshot(profile.userid, profile.username, profile.permissions,
-                            True, max(1, math.ceil(ttl_ms / 1000)), profile.departments)
+                            True, max(1, math.ceil(ttl_ms / 1000)), profile.departments,
+                            profile.employment_status)
 
     async def is_login_valid(self, userid: str) -> bool:
         return await self.get(userid) is not None
@@ -239,4 +252,5 @@ class UserService:
             return UserLoginStatus(None, False, 0)
         # 资料与续期在同一次 Redis 脚本中读取，避免随后查询姓名时用户已被移除。
         profile = self._decode(result[2])
-        return UserLoginStatus(result[0], True, result[1], profile.username, profile.departments)
+        return UserLoginStatus(result[0], True, result[1], profile.username, profile.departments,
+                               profile.employment_status)
