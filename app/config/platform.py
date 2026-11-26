@@ -24,14 +24,14 @@ class Platform(BaseModel):
     supports_a2a: bool = Field(default=False, description="是否参与 A2A 协议；平台 A2A 子平台接口要求此标记为 true，不改变平台登录及其他消息流权限。")
     is_sub_management_platform: bool = Field(default=False, description="是否为子管理平台；平台 A2A 子平台接口要求此标记为 true，不改变平台登录及其他消息流权限。")
     is_management_entry: bool = Field(default=False, description="是否作为管理平台入口，独立于子管理平台标记，不参与当前身份或流权限判断。")
-    a2aresponsibility: str = Field(default="", description="平台在 A2A 协作中的职责；子管理平台必须填写非空且非纯空白的字符串，其他平台可省略，默认为空字符串。")
+    a2aresponsibility: str = Field(default="", description="平台在 A2A 协作中的职责；同时开启 is_sub_management_platform 和 supports_a2a 时必须填写非空且非纯空白的字符串，其他平台可省略或为空字符串。")
     a2a_max_inflight: int | None = Field(default=None, strict=True, ge=1, le=100, description="本平台 A2A 消费窗口，子管理平台用于请求，顶层用于单聊反馈；1～100 的严格整数，省略或 null 时使用服务默认值，领取自动补齐剩余名额。")
 
     @model_validator(mode="after")
     def require_sub_platform_responsibility(self):
-        # 按子管理平台身份强制声明职责，不以 supports_a2a 开关绕过该约束。
-        if self.is_sub_management_platform and not self.a2aresponsibility.strip():
-            raise ValueError("子管理平台必须填写非空的 a2aresponsibility。")
+        # 仅对实际参与 A2A 的子管理平台强制声明职责，关闭 supports_a2a 时允许留空。
+        if self.is_sub_management_platform and self.supports_a2a and not self.a2aresponsibility.strip():
+            raise ValueError("参与 A2A 的子管理平台必须填写非空的 a2aresponsibility。")
         return self
 
 

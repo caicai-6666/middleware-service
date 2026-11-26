@@ -232,7 +232,7 @@ curl -X POST 'http://127.0.0.1:22000/middleware-service/api/platform/token/verif
 | `supports_a2a` | boolean | 平台是否参与 A2A 协议，来自 YAML 配置，默认 false。 |
 | `is_sub_management_platform` | boolean | 是否为子管理平台，来自 YAML 配置，默认 false。 |
 | `is_management_entry` | boolean | 是否作为管理平台入口，来自 YAML 配置，默认 false。与子管理平台标记独立。 |
-| `a2aresponsibility` | string | 平台后续 A2A 协作中的职责。子管理平台返回非空说明，如“负责解答合同相关问题。”；其他平台未配置时为空字符串。 |
+| `a2aresponsibility` | string | 平台后续 A2A 协作中的职责。参与 A2A 的子管理平台（is_sub_management_platform 与 supports_a2a 均为 true）返回非空说明，如“负责解答合同相关问题。”；其他平台未配置或关闭 A2A 时为空字符串。 |
 
 ### 错误响应
 

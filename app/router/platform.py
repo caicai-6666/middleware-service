@@ -133,7 +133,7 @@ class PlatformInfo(BaseModel):
     supports_a2a: bool = Field(description="配置中声明的是否参与 A2A 协议。")
     is_sub_management_platform: bool = Field(description="配置中声明的是否为子管理平台。")
     is_management_entry: bool = Field(description="配置中声明的是否作为管理平台入口。")
-    a2aresponsibility: str = Field(description="平台在 A2A 协作中的职责；子管理平台为非空说明，其他平台未配置时为空字符串。")
+    a2aresponsibility: str = Field(description="平台在 A2A 协作中的职责；参与 A2A 的子管理平台为非空说明，其他平台未配置或未开启 A2A 时为空字符串。")
     is_alive: bool = Field(description="是否存在尚未过期的登录会话；不代表业务或 RabbitMQ 健康状态。")
 
 

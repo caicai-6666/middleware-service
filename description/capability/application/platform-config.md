@@ -29,12 +29,12 @@ platforms:
 | `supports_a2a` | 可选严格布尔值，默认 false，声明是否参与 A2A 协议。 |
 | `is_sub_management_platform` | 可选严格布尔值，默认 false，声明是否为子管理平台。 |
 | `is_management_entry` | 可选严格布尔值，默认 false，声明是否作为管理平台入口，与子管理平台标记独立。 |
-| `a2aresponsibility` | A2A 协作职责字符串；is_sub_management_platform=true 时必填、非空且不能全为空白。其他平台可省略，默认空字符串；显式 null、非字符串不合法。 |
+| `a2aresponsibility` | A2A 协作职责字符串；is_sub_management_platform=true 且 supports_a2a=true 时必填、非空且不能全为空白。其他平台（包括未开启 supports_a2a 的子管理平台）可省略或为空字符串；显式 null、非字符串不合法。 |
 | `a2a_max_inflight` | 可选严格整数 1～100，本平台 A2A 消费窗口：子平台用于请求，顶层用于单聊反馈；省略或 null 使用默认窗口 3（可通过环境覆盖）。不能填写布尔值、字符串或浮点数。 |
 
 code、name、description、secret 四个字段必填，supports_a2a、is_sub_management_platform 和 is_management_entry 可省略；拒绝未知字段、重复 YAML 字段和空平台列表。三个标记必须使用 YAML 布尔值 true/false，不能使用带引号字符串、数字或 null。名称、描述和密钥不能仅包含空白。密钥建议加引号，避免 YAML 将纯数字等内容识别为其他类型。示例密钥仅用于说明，部署时替换为各平台独立密钥。
 
-子管理平台需声明具体职责，supports_a2a 即使为 false 也必须填写；不自动更改任何布尔标记。例如合同平台：
+同时开启 is_sub_management_platform 与 supports_a2a 的子管理平台需声明具体职责；未开启 supports_a2a 时允许省略或为空字符串，不自动更改任何布尔标记。例如合同平台：
 
 ```yaml
 is_sub_management_platform: true
@@ -107,7 +107,7 @@ Compose 的 `.env` 负责 RabbitMQ 凭据、业务流和后端运行参数。生
 
 ## 验证
 
-历史本地配置测试覆盖默认与覆盖路径、工作目录独立性、直接密钥、字段与重复项校验、敏感信息保护及启动生命周期；tests 目录按现有仓库规则不随代码分发。当前 a2a_max_inflight 的类型、范围、默认值和平台覆盖已在本机 `tests/test_platform_a2a.py` 中验证，见[平台 A2A 验证状态](platform-a2a.md#验证状态)。
+历史本地配置测试覆盖默认与覆盖路径、工作目录独立性、直接密钥、字段与重复项校验、敏感信息保护及启动生命周期；tests 目录按现有仓库规则不随代码分发。当前 a2a_max_inflight 的类型、范围、默认值和平台覆盖已在本机 `tests/test_platform_a2a.py` 中验证，见[平台 A2A 验证状态](platform-a2a.md#验证状态)；`a2aresponsibility` 与 `supports_a2a`、`is_sub_management_platform` 的联动校验已在本机 `tests/test_platform_config.py` 中验证。
 
 ```bash
 conda activate middleware-service
